@@ -2,4 +2,9 @@
 
 ## Scope
 
-The scope of the Orchestrator is to create and manage OpenClaw containers.
+The Orchestrator is responsible for creating and managing OpenClaw containers.
+
+It exposes a simple authenticated REST API that allows clients to:
+
+- Instruct the Orchestrator which containers to create
+- Maintain and query the state of running containers

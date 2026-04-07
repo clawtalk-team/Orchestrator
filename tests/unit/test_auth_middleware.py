@@ -1,5 +1,5 @@
 """Unit tests for authentication middleware."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -68,8 +68,8 @@ def test_protected_endpoint_with_master_key(client, monkeypatch):
     get_settings.cache_clear()
 
 
-@patch("app.middleware.auth.httpx.AsyncClient")
-def test_protected_endpoint_with_valid_api_key(mock_client_class, client, monkeypatch):
+@patch("app.middleware.auth.get_auth_client")
+def test_protected_endpoint_with_valid_api_key(mock_get_auth_client, client, monkeypatch):
     """Test valid API key validated by auth-gateway."""
     monkeypatch.setenv("AUTH_GATEWAY_URL", "http://auth-gateway:8001")
 
@@ -84,8 +84,8 @@ def test_protected_endpoint_with_valid_api_key(mock_client_class, client, monkey
     mock_response.json.return_value = {"user_id": "user-123"}
 
     mock_client = MagicMock()
-    mock_client.__aenter__.return_value.get.return_value = mock_response
-    mock_client_class.return_value = mock_client
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
 
     response = client.get(
         "/test", headers={"Authorization": "Bearer sk-clawtalk-test-key"}
@@ -96,31 +96,29 @@ def test_protected_endpoint_with_valid_api_key(mock_client_class, client, monkey
     get_settings.cache_clear()
 
 
-@patch("app.middleware.auth.httpx.AsyncClient")
-def test_protected_endpoint_invalid_api_key(mock_client_class, client):
+@patch("app.middleware.auth.get_auth_client")
+def test_protected_endpoint_invalid_api_key(mock_get_auth_client, client):
     """Test invalid API key rejected by auth-gateway."""
     # Mock auth-gateway response
     mock_response = MagicMock()
     mock_response.status_code = 401
 
     mock_client = MagicMock()
-    mock_client.__aenter__.return_value.get.return_value = mock_response
-    mock_client_class.return_value = mock_client
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
 
     response = client.get("/test", headers={"Authorization": "Bearer invalid-key"})
     assert response.status_code == 401
     assert "Invalid API key" in response.json()["detail"]
 
 
-@patch("app.middleware.auth.httpx.AsyncClient")
-def test_protected_endpoint_auth_service_error(mock_client_class, client):
+@patch("app.middleware.auth.get_auth_client")
+def test_protected_endpoint_auth_service_error(mock_get_auth_client, client):
     """Test auth service error handling."""
     # Mock auth-gateway connection error
     mock_client = MagicMock()
-    mock_client.__aenter__.return_value.get.side_effect = httpx.RequestError(
-        "Connection failed"
-    )
-    mock_client_class.return_value = mock_client
+    mock_client.get = AsyncMock(side_effect=httpx.RequestError("Connection failed"))
+    mock_get_auth_client.return_value = mock_client
 
     response = client.get(
         "/test", headers={"Authorization": "Bearer sk-clawtalk-test-key"}

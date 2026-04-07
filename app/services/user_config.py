@@ -17,9 +17,31 @@ Secrets are stored in plaintext for now.
 import json
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from app.services.dynamodb import _get_table
+
+
+def _convert_decimals(obj: Any) -> Any:
+    """
+    Recursively convert Decimal objects to int or float.
+
+    DynamoDB returns numbers as Decimal objects, but we want to return
+    them as int/float for JSON serialization.
+    """
+    if isinstance(obj, Decimal):
+        # Convert to int if it's a whole number, otherwise float
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_decimals(item) for item in obj]
+    else:
+        return obj
 
 
 class UserConfigService:
@@ -27,6 +49,27 @@ class UserConfigService:
 
     def __init__(self):
         self.table = _get_table()
+
+    def _process_raw_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a raw DynamoDB item into a configuration dictionary.
+
+        Args:
+            item: Raw DynamoDB item
+
+        Returns:
+            Dict containing processed config data with converted decimals
+        """
+        config = {}
+
+        # Copy all fields except DynamoDB internal fields
+        excluded_fields = {"pk", "sk", "config_type"}
+        for key, value in item.items():
+            if key not in excluded_fields and value is not None:
+                # Convert Decimal objects to int/float for JSON serialization
+                config[key] = _convert_decimals(value)
+
+        return config
 
     def get_user_config(
         self, user_id: str, config_name: str = "default"
@@ -55,25 +98,7 @@ class UserConfigService:
         if "Item" not in response:
             return None
 
-        item = response["Item"]
-        config = {}
-
-        # Copy all fields (secrets stored in plaintext for now)
-        for key in [
-            "user_id",
-            "llm_provider",
-            "openclaw_model",
-            "max_containers",
-            "auth_gateway_api_key",
-            "anthropic_api_key",
-            "openai_api_key",
-            "openrouter_api_key",
-            "openclaw_token",
-        ]:
-            if key in item:
-                config[key] = item[key]
-
-        return config
+        return self._process_raw_item(response["Item"])
 
     def save_user_config(
         self,
@@ -81,7 +106,7 @@ class UserConfigService:
         config: Dict[str, Any],
         config_name: str = "default",
         overwrite: bool = False,
-    ) -> None:
+    ) -> Dict[str, str]:
         """
         Save user configuration (plaintext, no encryption).
 
@@ -93,19 +118,20 @@ class UserConfigService:
         """
         now = datetime.now(timezone.utc)
 
+        # Get existing item data to preserve created_at
+        raw_item = self.table.get_item(
+            Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
+        )
+        existing_item_data = raw_item.get("Item")
+
         # If not overwriting, merge with existing config
-        existing_item_data = None
-        if not overwrite:
-            existing = self.get_user_config(user_id, config_name) or {}
-            # Also get the raw item to preserve created_at
-            raw_item = self.table.get_item(
-                Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
-            )
-            if "Item" in raw_item:
-                existing_item_data = raw_item["Item"]
+        if not overwrite and existing_item_data:
+            # Process existing item to get config data (avoids redundant get_item call)
+            existing = self._process_raw_item(existing_item_data)
             # Merge: new values override old ones
             merged = {**existing, **config}
             config = merged
+        # Note: When overwriting, put_item replaces the item entirely, no delete needed
 
         item = {
             "pk": f"USER#{user_id}",
@@ -115,21 +141,12 @@ class UserConfigService:
             "updated_at": now.isoformat(),
         }
 
-        # Store all fields in plaintext (no encryption for now)
-        all_fields = [
-            "auth_gateway_api_key",
-            "anthropic_api_key",
-            "openai_api_key",
-            "openrouter_api_key",
-            "openclaw_token",
-            "llm_provider",
-            "openclaw_model",
-            "max_containers",
-        ]
-
-        for field in all_fields:
-            if field in config and config[field]:
-                item[field] = config[field]
+        # Store all fields from config (supports arbitrary JSON fields)
+        # Exclude any fields that shouldn't be stored or would conflict with DynamoDB keys
+        excluded_from_config = {"pk", "sk", "config_type", "created_at", "updated_at"}
+        for key, value in config.items():
+            if key not in excluded_from_config and value is not None:
+                item[key] = value
 
         # Preserve created_at from existing item (fetched earlier if not overwrite)
         if existing_item_data:
@@ -138,6 +155,12 @@ class UserConfigService:
             item["created_at"] = now.isoformat()
 
         self.table.put_item(Item=item)
+
+        # Return timestamps so caller doesn't need another database call
+        return {
+            "created_at": item["created_at"],
+            "updated_at": item["updated_at"]
+        }
 
     def get_system_config(self) -> Dict[str, Any]:
         """
@@ -161,12 +184,15 @@ class UserConfigService:
             }
 
         item = response["Item"]
-        return {
+        config = {
             "auth_gateway_url": item.get("auth_gateway_url"),
             "openclaw_url": item.get("openclaw_url"),
             "openclaw_token": item.get("openclaw_token"),
             "voice_gateway_url": item.get("voice_gateway_url"),
+            "updated_at": item.get("updated_at"),  # Include timestamp to avoid redundant read
         }
+        # Convert any Decimal values to int/float
+        return _convert_decimals(config)
 
     def save_system_config(self, config: Dict[str, Any]) -> None:
         """
@@ -260,9 +286,14 @@ class UserConfigService:
                 "models": [{"id": "gpt-4", "name": "GPT-4"}],
             }
 
-        openclaw_token = system_config.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+        openclaw_token = system_config.get("openclaw_token") or os.environ.get(
+            "OPENCLAW_GATEWAY_TOKEN"
+        )
         if not openclaw_token:
-            raise ValueError("openclaw_token must be set in system config or OPENCLAW_GATEWAY_TOKEN environment variable")
+            raise ValueError(
+                "openclaw_token must be set in system config or "
+                "OPENCLAW_GATEWAY_TOKEN environment variable"
+            )
 
         return {
             "gateway": {
@@ -301,9 +332,14 @@ class UserConfigService:
         user_config = self.get_user_config(user_id, config_name) or {}
         system_config = self.get_system_config()
 
-        openclaw_token = system_config.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+        openclaw_token = system_config.get("openclaw_token") or os.environ.get(
+            "OPENCLAW_GATEWAY_TOKEN"
+        )
         if not openclaw_token:
-            raise ValueError("openclaw_token must be set in system config or OPENCLAW_GATEWAY_TOKEN environment variable")
+            raise ValueError(
+                "openclaw_token must be set in system config or "
+                "OPENCLAW_GATEWAY_TOKEN environment variable"
+            )
 
         return {
             "agents": [],  # Will be populated after registration

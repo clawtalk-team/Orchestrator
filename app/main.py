@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.middleware.auth import APIKeyMiddleware
-from app.routes import containers, health
+from app.routes import config, containers, health
 from app.services.dynamodb import ensure_table_exists
 
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +69,10 @@ All endpoints (except `/health`) require API key authentication via the `Authori
             "name": "containers",
             "description": "Operations for managing agent containers",
         },
+        {
+            "name": "config",
+            "description": "Configuration management for users and system defaults",
+        },
     ],
 )
 
@@ -99,6 +103,7 @@ app.add_middleware(APIKeyMiddleware)
 
 app.include_router(health.router)
 app.include_router(containers.router)
+app.include_router(config.router)
 
 
 @app.get("/", include_in_schema=False)

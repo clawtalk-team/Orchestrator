@@ -52,15 +52,12 @@ class ContainerRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "name": "my-agent-container",
-            "config": {
-                "environment": "production",
-                "max_agents": 5
-            }
+            "config_name": "default"
         }
     })
 
     name: Optional[str] = Field(default=None, description="Optional container name for identification")
-    config: Optional[Dict[str, Any]] = Field(default=None, description="Optional custom configuration overrides for the container")
+    config_name: Optional[str] = Field(default="default", description="Named configuration to use (default: 'default')")
 
 
 class ContainerResponse(BaseModel):

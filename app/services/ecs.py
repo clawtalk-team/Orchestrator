@@ -21,31 +21,52 @@ def _generate_container_id() -> str:
 
 
 def create_container(
-    user_id: str, api_key: str, config: Optional[Dict[str, Any]] = None
+    user_id: str,
+    api_key: str,
+    config_name: str = "default",
 ) -> Container:
     """
     Create a new ECS container for a user.
 
     The container will fetch its configuration from DynamoDB on startup.
-    User config must already exist in DynamoDB before calling this.
+    If user config does not exist, it will be created with defaults.
 
     Args:
         user_id: The user ID
         api_key: The API key for auth-gateway (from Authorization header)
-        config: Optional custom config overrides (not used yet, for future)
+        config_name: Named configuration to use (default: "default")
 
     Returns:
         Container record in PENDING status.
         The actual ECS task creation is async and will be updated when RUNNING.
     """
+    from app.services.user_config import UserConfigService
+
     settings = get_settings()
     container_id = _generate_container_id()
     now = datetime.now(timezone.utc)
 
-    # Note: We no longer use SSM Parameter Store
-    # Config will be fetched from DynamoDB on container startup
+    # 1. Get or create user config with defaults
+    config_service = UserConfigService()
+    user_config = config_service.get_user_config(user_id, config_name) or {}
 
-    # Create Container record in PENDING status
+    # Set defaults if not present
+    if "llm_provider" not in user_config:
+        user_config["llm_provider"] = "anthropic"
+    if "openclaw_model" not in user_config:
+        user_config["openclaw_model"] = "claude-3-haiku-20240307"
+
+    # 2. Store api_key in user config (plaintext for now)
+    user_config["auth_gateway_api_key"] = api_key
+
+    config_service.save_user_config(
+        user_id=user_id,
+        config_name=config_name,
+        config=user_config,
+        overwrite=False,  # Merge with existing
+    )
+
+    # 3. Create Container record in PENDING status
     container = Container(
         container_id=container_id,
         user_id=user_id,
@@ -59,14 +80,15 @@ def create_container(
     # Save to DynamoDB
     dynamodb.create_container(container)
 
-    # Start ECS task asynchronously
+    # 4. Start ECS task asynchronously
     try:
         ecs = _get_ecs_client()
 
         # Minimal environment variables - container fetches config from DynamoDB
         environment = [
-            {"name": "CONTAINER_ID", "value": container_id},
             {"name": "USER_ID", "value": user_id},
+            {"name": "CONTAINER_ID", "value": container_id},
+            {"name": "CONFIG_NAME", "value": config_name},
             {"name": "DYNAMODB_TABLE", "value": settings.containers_table},
             {"name": "DYNAMODB_REGION", "value": settings.dynamodb_region},
         ]

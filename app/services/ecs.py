@@ -101,12 +101,18 @@ def create_container(user_id: str, config: Optional[Dict[str, Any]] = None) -> C
                 "value": config_param_name,
             })
 
+        # Get VPC configuration from environment
+        subnets = [s.strip() for s in settings.ecs_subnets.split(",") if s.strip()]
+        security_groups = [sg.strip() for sg in settings.ecs_security_groups.split(",") if sg.strip()]
+
         response = ecs.run_task(
             cluster=settings.ecs_cluster_name,
             taskDefinition=settings.ecs_task_definition,
             launchType="FARGATE",
             networkConfiguration={
                 "awsvpcConfiguration": {
+                    "subnets": subnets,
+                    "securityGroups": security_groups,
                     "assignPublicIp": "DISABLED",
                 }
             },

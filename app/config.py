@@ -13,7 +13,9 @@ def _load_ssm_config() -> None:
         return
     try:
         import boto3
-        ssm = boto3.client("ssm", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+        # Lambda sets AWS_REGION automatically, fall back to DYNAMODB_REGION or default
+        region = os.environ.get("AWS_REGION") or os.environ.get("DYNAMODB_REGION", "us-east-1")
+        ssm = boto3.client("ssm", region_name=region)
         response = ssm.get_parameter(Name=path, WithDecryption=True)
         config = json.loads(response["Parameter"]["Value"])
         for key, value in config.items():
@@ -37,7 +39,7 @@ class Settings(BaseSettings):
 
     # DynamoDB
     dynamodb_endpoint: Optional[str] = None
-    dynamodb_region: str = Field(default="us-east-1", alias="AWS_DEFAULT_REGION")
+    dynamodb_region: str = "us-east-1"  # Lambda sets AWS_REGION, can also use DYNAMODB_REGION
     aws_access_key_id: str = "local"
     aws_secret_access_key: str = "local"
     containers_table: str = "openclaw-containers"
@@ -46,6 +48,8 @@ class Settings(BaseSettings):
     ecs_cluster_name: str = "openclaw"
     ecs_task_definition: str = "openclaw-agent"
     ecs_container_name: str = "openclaw-agent"
+    ecs_subnets: str = ""  # Comma-separated subnet IDs
+    ecs_security_groups: str = ""  # Comma-separated security group IDs
 
     # Auth Gateway
     auth_gateway_url: str = "http://localhost:8001"

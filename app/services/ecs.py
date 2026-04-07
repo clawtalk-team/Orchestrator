@@ -1,7 +1,7 @@
 import boto3
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import json
 
@@ -40,7 +40,7 @@ def create_container(
     """
     settings = get_settings()
     container_id = _generate_container_id()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Note: We no longer use SSM Parameter Store
     # Config will be fetched from DynamoDB on container startup
@@ -108,12 +108,12 @@ def create_container(
         if response.get("tasks"):
             task_arn = response["tasks"][0]["taskArn"]
             container.task_arn = task_arn
-            container.updated_at = datetime.utcnow()
+            container.updated_at = datetime.now(timezone.utc)
             dynamodb.update_container(container)
     except Exception as e:
         # If task creation fails, mark container as FAILED
         container.status = "FAILED"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
         raise
 
@@ -140,7 +140,7 @@ def stop_container(user_id: str, container_id: str) -> bool:
 
         # Update status to STOPPED
         container.status = "STOPPED"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
         return True
     except Exception as e:
@@ -219,10 +219,10 @@ def handle_task_event(event: Dict[str, Any]) -> None:
 
         container.status = "RUNNING"
         container.health_status = "STARTING"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
 
     elif status in ("STOPPED", "STOPPING", "DEPROVISIONING"):
         container.status = "STOPPED"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)

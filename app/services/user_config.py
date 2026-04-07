@@ -11,7 +11,7 @@ Both stored in the same DynamoDB table using single-table design:
 """
 
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from app.services.dynamodb import _get_table
@@ -94,11 +94,18 @@ class UserConfigService:
             config: Configuration dict with secrets in plaintext
             overwrite: If False, merge with existing config; if True, replace completely
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # If not overwriting, merge with existing config
+        existing_item_data = None
         if not overwrite:
             existing = self.get_user_config(user_id) or {}
+            # Also get the raw item to preserve created_at
+            raw_item = self.table.get_item(
+                Key={"pk": f"USER#{user_id}", "sk": "CONFIG#primary"}
+            )
+            if "Item" in raw_item:
+                existing_item_data = raw_item["Item"]
             # Merge: new values override old ones
             merged = {**existing, **config}
             config = merged
@@ -135,14 +142,9 @@ class UserConfigService:
             if field in config:
                 item[field] = config[field]
 
-        # Check if exists to preserve created_at
-        existing_item = self.table.get_item(
-            Key={"pk": f"USER#{user_id}", "sk": "CONFIG#primary"}
-        )
-        if "Item" in existing_item:
-            item["created_at"] = existing_item["Item"].get(
-                "created_at", now.isoformat()
-            )
+        # Preserve created_at from existing item (fetched earlier if not overwrite)
+        if existing_item_data:
+            item["created_at"] = existing_item_data.get("created_at", now.isoformat())
         else:
             item["created_at"] = now.isoformat()
 
@@ -185,7 +187,7 @@ class UserConfigService:
         Args:
             config: System configuration (URLs, tokens, etc.)
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         item = {
             "pk": "SYSTEM",
@@ -272,7 +274,7 @@ class UserConfigService:
                 "port": 18789,
                 "mode": "local",
                 "bind": "lan",
-                "auth": {"mode": "token", "token": "test-token-123"},
+                "auth": {"mode": "token", "token": system_config.get("openclaw_token", os.environ.get("OPENCLAW_GATEWAY_TOKEN", "test-token-123"))},
                 "http": {"endpoints": {"chatCompletions": {"enabled": True}}},
             },
             "models": {"providers": providers},
@@ -308,7 +310,7 @@ class UserConfigService:
             "auth_gateway_url": system_config.get("auth_gateway_url"),
             "auth_gateway_api_key": api_key,
             "openclaw_url": system_config.get("openclaw_url"),
-            "openclaw_token": system_config.get("openclaw_token", "test-token-123"),
+            "openclaw_token": system_config.get("openclaw_token", os.environ.get("OPENCLAW_GATEWAY_TOKEN", "test-token-123")),
             "openclaw_model": user_config.get(
                 "openclaw_model", "claude-3-haiku-20240307"
             ),

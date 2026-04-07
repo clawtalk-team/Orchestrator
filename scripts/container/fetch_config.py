@@ -113,10 +113,9 @@ class ConfigFetcher:
 
     def decrypt_field(self, encrypted_value: str) -> str:
         """
-        Decrypt an encrypted field value.
+        Decrypt an encrypted field value using Fernet encryption.
 
-        Note: This is a placeholder. In production, implement actual decryption
-        using the same encryption key/method as the orchestrator.
+        Uses the same ENCRYPTION_KEY as the orchestrator to decrypt sensitive fields.
 
         Args:
             encrypted_value: The encrypted value
@@ -124,9 +123,14 @@ class ConfigFetcher:
         Returns:
             Decrypted plaintext
         """
-        # TODO: Implement actual decryption
-        # For now, just return as-is (assumes orchestrator isn't encrypting yet)
-        return encrypted_value
+        from cryptography.fernet import Fernet
+
+        encryption_key = os.environ.get('ENCRYPTION_KEY')
+        if not encryption_key:
+            raise ValueError("ENCRYPTION_KEY environment variable must be set for decryption")
+
+        fernet = Fernet(encryption_key.encode())
+        return fernet.decrypt(encrypted_value.encode()).decode()
 
     def build_openclaw_config(
         self, user_config: Dict[str, Any], system_config: Dict[str, Any]

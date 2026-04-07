@@ -144,6 +144,8 @@ ecr-login:
 ## lambda-push ENV=dev: build ARM64 Lambda image and push to ECR
 lambda-push: ecr-login
 	docker build \
+		--provenance=false \
+		--sbom=false \
 		--build-arg GIT_COMMIT=$(IMAGE_TAG) \
 		--platform linux/arm64 \
 		-f Dockerfile.lambda \

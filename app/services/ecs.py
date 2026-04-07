@@ -1,14 +1,13 @@
 import boto3
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import json
 
 from app.config import get_settings
 from app.models.container import Container
 from app.services import dynamodb
-from app.services.config_store import store_config
 
 
 def _get_ecs_client():
@@ -21,21 +20,30 @@ def _generate_container_id() -> str:
     return f"oc-{uuid.uuid4().hex[:8]}"
 
 
-def create_container(user_id: str, config: Optional[Dict[str, Any]] = None) -> Container:
+def create_container(
+    user_id: str, api_key: str, config: Optional[Dict[str, Any]] = None
+) -> Container:
     """
     Create a new ECS container for a user.
 
-    Returns a Container record in PENDING status.
-    The actual ECS task creation is async and will be updated when RUNNING.
+    The container will fetch its configuration from DynamoDB on startup.
+    User config must already exist in DynamoDB before calling this.
+
+    Args:
+        user_id: The user ID
+        api_key: The API key for auth-gateway (from Authorization header)
+        config: Optional custom config overrides (not used yet, for future)
+
+    Returns:
+        Container record in PENDING status.
+        The actual ECS task creation is async and will be updated when RUNNING.
     """
     settings = get_settings()
     container_id = _generate_container_id()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
-    # Store config in SSM if provided
-    config_param_name = None
-    if config:
-        config_param_name = store_config(user_id, container_id, config)
+    # Note: We no longer use SSM Parameter Store
+    # Config will be fetched from DynamoDB on container startup
 
     # Create Container record in PENDING status
     container = Container(
@@ -54,29 +62,26 @@ def create_container(user_id: str, config: Optional[Dict[str, Any]] = None) -> C
     # Start ECS task asynchronously
     try:
         ecs = _get_ecs_client()
+
+        # Minimal environment variables - container fetches config from DynamoDB
+        environment = [
+            {"name": "CONTAINER_ID", "value": container_id},
+            {"name": "USER_ID", "value": user_id},
+            {"name": "DYNAMODB_TABLE", "value": settings.containers_table},
+            {"name": "DYNAMODB_REGION", "value": settings.dynamodb_region},
+        ]
+
+        # For local development, pass DynamoDB endpoint
+        if settings.dynamodb_endpoint:
+            environment.append(
+                {"name": "DYNAMODB_ENDPOINT", "value": settings.dynamodb_endpoint}
+            )
+
         overrides = {
             "containerOverrides": [
-                {
-                    "name": settings.ecs_container_name,
-                    "environment": [
-                        {
-                            "name": "CONTAINER_ID",
-                            "value": container_id,
-                        },
-                        {
-                            "name": "USER_ID",
-                            "value": user_id,
-                        },
-                    ],
-                }
+                {"name": settings.ecs_container_name, "environment": environment}
             ]
         }
-
-        if config_param_name:
-            overrides["containerOverrides"][0]["environment"].append({
-                "name": "SSM_CONFIG_PATH",
-                "value": config_param_name,
-            })
 
         # Get VPC configuration from environment
         subnets = [s.strip() for s in settings.ecs_subnets.split(",") if s.strip()]
@@ -103,12 +108,12 @@ def create_container(user_id: str, config: Optional[Dict[str, Any]] = None) -> C
         if response.get("tasks"):
             task_arn = response["tasks"][0]["taskArn"]
             container.task_arn = task_arn
-            container.updated_at = datetime.utcnow()
+            container.updated_at = datetime.now(timezone.utc)
             dynamodb.update_container(container)
     except Exception as e:
         # If task creation fails, mark container as FAILED
         container.status = "FAILED"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
         raise
 
@@ -135,7 +140,7 @@ def stop_container(user_id: str, container_id: str) -> bool:
 
         # Update status to STOPPED
         container.status = "STOPPED"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
         return True
     except Exception as e:
@@ -214,10 +219,10 @@ def handle_task_event(event: Dict[str, Any]) -> None:
 
         container.status = "RUNNING"
         container.health_status = "STARTING"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
 
     elif status in ("STOPPED", "STOPPING", "DEPROVISIONING"):
         container.status = "STOPPED"
-        container.updated_at = datetime.utcnow()
+        container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)

@@ -47,7 +47,7 @@ Example: `{USER_ID}:{YOUR_TOKEN}`
 ### Local Development
 ```bash
 # Run locally with Docker Compose
-make dev
+make docker-up
 
 # Test the API
 curl http://localhost:8000/health
@@ -149,7 +149,7 @@ make install-dev
 make test
 
 # Run locally
-make dev
+make docker-up
 
 # Build Lambda image
 make build-lambda

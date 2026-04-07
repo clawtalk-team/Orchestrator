@@ -1,11 +1,33 @@
 import hashlib
 import secrets
+
+import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.services import dynamodb as db
 from app.config import get_settings
+from app.services import dynamodb as db
+
+# Global httpx client for auth-gateway requests (reused across requests)
+_auth_client = None
+
+
+def get_auth_client() -> httpx.AsyncClient:
+    """Get or create the shared httpx client for auth-gateway requests."""
+    global _auth_client
+    if _auth_client is None:
+        settings = get_settings()
+        _auth_client = httpx.AsyncClient(timeout=settings.auth_gateway_timeout)
+    return _auth_client
+
+
+async def close_auth_client():
+    """Close the shared httpx client."""
+    global _auth_client
+    if _auth_client is not None:
+        await _auth_client.aclose()
+        _auth_client = None
 
 
 def _is_public(method: str, path: str) -> bool:
@@ -18,9 +40,11 @@ def _is_public(method: str, path: str) -> bool:
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # Skip auth for public endpoints
         if _is_public(request.method, request.url.path):
             return await call_next(request)
 
+        # Extract api_key from Authorization header
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return JSONResponse(
@@ -28,25 +52,48 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 status_code=401,
             )
 
-        key = auth[len("Bearer "):]
+        api_key = auth[len("Bearer ") :]
         settings = get_settings()
 
-        # Check master API key first
-        if settings.master_api_key and secrets.compare_digest(key, settings.master_api_key):
+        # Check master API key (for admin operations)
+        if settings.master_api_key and secrets.compare_digest(
+            api_key, settings.master_api_key
+        ):
             request.state.user_id = "master"
-            request.state.api_key = key  # Store API key for containers
+            request.state.api_key = api_key
             return await call_next(request)
 
-        # In Phase 1, validate token format; auth-gateway validation deferred to Phase 2
-        if not key or len(key) < 20:
-            return JSONResponse({"detail": "Invalid API key"}, status_code=401)
-
-        # Extract user_id from token (format: user_uuid:token_hash)
+        # Validate with auth-gateway
         try:
-            user_id, _ = key.split(":", 1)
+            client = get_auth_client()
+            response = await client.get(
+                f"{settings.auth_gateway_url}/auth",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+
+            if response.status_code != 200:
+                return JSONResponse({"detail": "Invalid API key"}, status_code=401)
+
+            # Extract user_id from auth-gateway response
+            auth_data = response.json()
+            user_id = auth_data.get("user_id")
+
+            if not user_id:
+                return JSONResponse(
+                    {"detail": "Invalid auth response"}, status_code=500
+                )
+
+            # Store in request state
             request.state.user_id = user_id
-            request.state.api_key = key  # Store full API key for passing to containers
-        except ValueError:
-            return JSONResponse({"detail": "Invalid API key format"}, status_code=401)
+            request.state.api_key = api_key
+
+        except httpx.TimeoutException:
+            return JSONResponse({"detail": "Auth service timeout"}, status_code=503)
+        except httpx.RequestError as e:
+            return JSONResponse(
+                {"detail": f"Auth service error: {str(e)}"}, status_code=503
+            )
+        except Exception as e:
+            return JSONResponse({"detail": "Authentication failed"}, status_code=500)
 
         return await call_next(request)

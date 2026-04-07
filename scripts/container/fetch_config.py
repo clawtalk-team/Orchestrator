@@ -10,17 +10,18 @@ from DynamoDB and write it to the appropriate config files:
 Environment variables required:
 - USER_ID: The user ID to fetch config for
 - CONTAINER_ID: The container ID (for logging)
+- CONFIG_NAME: Named configuration to use (default: "default")
 - AWS_REGION: AWS region for DynamoDB (default: ap-southeast-2)
 - DYNAMODB_ENDPOINT: Optional DynamoDB endpoint (for local dev)
 - DYNAMODB_TABLE: DynamoDB table name (default: openclaw-containers)
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 try:
     import boto3
@@ -60,23 +61,35 @@ class ConfigFetcher:
         self.dynamodb = boto3.resource("dynamodb", **kwargs)
         self.table = self.dynamodb.Table(table_name)
 
-    def get_user_config(self, user_id: str) -> Dict[str, Any]:
+    def get_user_config(
+        self, user_id: str, config_name: str = "default"
+    ) -> Dict[str, Any]:
         """
         Fetch user configuration from DynamoDB.
 
         Args:
             user_id: The user ID
+            config_name: Named configuration (default: "default")
 
         Returns:
-            User config dict (secrets are still encrypted)
+            User config dict (secrets in plaintext)
         """
         try:
+            # Try named config first
             response = self.table.get_item(
-                Key={"pk": f"USER#{user_id}", "sk": "CONFIG#primary"}
+                Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
             )
 
+            # Fallback to CONFIG#primary for backward compatibility
+            if "Item" not in response and config_name == "default":
+                response = self.table.get_item(
+                    Key={"pk": f"USER#{user_id}", "sk": "CONFIG#primary"}
+                )
+
             if "Item" not in response:
-                print(f"WARNING: No user config found for user_id={user_id}")
+                print(
+                    f"WARNING: No user config found for user_id={user_id}, config_name={config_name}"
+                )
                 return {}
 
             return dict(response["Item"])
@@ -111,27 +124,6 @@ class ConfigFetcher:
             print(f"ERROR: Failed to fetch system config: {e}")
             return {}
 
-    def decrypt_field(self, encrypted_value: str) -> str:
-        """
-        Decrypt an encrypted field value using Fernet encryption.
-
-        Uses the same ENCRYPTION_KEY as the orchestrator to decrypt sensitive fields.
-
-        Args:
-            encrypted_value: The encrypted value
-
-        Returns:
-            Decrypted plaintext
-        """
-        from cryptography.fernet import Fernet
-
-        encryption_key = os.environ.get('ENCRYPTION_KEY')
-        if not encryption_key:
-            raise ValueError("ENCRYPTION_KEY environment variable must be set for decryption")
-
-        fernet = Fernet(encryption_key.encode())
-        return fernet.decrypt(encrypted_value.encode()).decode()
-
     def build_openclaw_config(
         self, user_config: Dict[str, Any], system_config: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -139,7 +131,7 @@ class ConfigFetcher:
         Build OpenClaw gateway configuration.
 
         Args:
-            user_config: User-specific config
+            user_config: User-specific config (plaintext, no encryption)
             system_config: System-wide config
 
         Returns:
@@ -147,24 +139,10 @@ class ConfigFetcher:
         """
         llm_provider = user_config.get("llm_provider", "anthropic")
 
-        # Decrypt API keys if encrypted
-        anthropic_key = user_config.get("anthropic_api_key_encrypted", "")
-        if anthropic_key:
-            anthropic_key = self.decrypt_field(anthropic_key)
-        else:
-            anthropic_key = user_config.get("anthropic_api_key", "")
-
-        openrouter_key = user_config.get("openrouter_api_key_encrypted", "")
-        if openrouter_key:
-            openrouter_key = self.decrypt_field(openrouter_key)
-        else:
-            openrouter_key = user_config.get("openrouter_api_key", "")
-
-        openai_key = user_config.get("openai_api_key_encrypted", "")
-        if openai_key:
-            openai_key = self.decrypt_field(openai_key)
-        else:
-            openai_key = user_config.get("openai_api_key", "")
+        # Read API keys directly (stored in plaintext for now)
+        anthropic_key = user_config.get("anthropic_api_key", "")
+        openrouter_key = user_config.get("openrouter_api_key", "")
+        openai_key = user_config.get("openai_api_key", "")
 
         # Build providers config
         providers = {}
@@ -225,20 +203,21 @@ class ConfigFetcher:
             }
 
         openclaw_model = user_config.get("openclaw_model", "claude-3-haiku-20240307")
+        openclaw_token = system_config.get("openclaw_token")
+        if not openclaw_token:
+            raise ValueError("openclaw_token is required in system config")
 
         return {
             "gateway": {
                 "port": 18789,
                 "mode": "local",
                 "bind": "lan",
-                "auth": {"mode": "token", "token": "test-token-123"},
+                "auth": {"mode": "token", "token": openclaw_token},
                 "http": {"endpoints": {"chatCompletions": {"enabled": True}}},
             },
             "models": {"providers": providers},
             "agents": {
-                "defaults": {
-                    "model": {"primary": f"{llm_provider}/{openclaw_model}"}
-                }
+                "defaults": {"model": {"primary": f"{llm_provider}/{openclaw_model}"}}
             },
         }
 
@@ -250,31 +229,16 @@ class ConfigFetcher:
 
         Args:
             user_id: The user ID
-            user_config: User-specific config
+            user_config: User-specific config (plaintext, no encryption)
             system_config: System-wide config
 
         Returns:
             Agent config dict
         """
-        # Decrypt API keys if encrypted
-        auth_api_key = user_config.get("auth_gateway_api_key_encrypted", "")
-        if auth_api_key:
-            auth_api_key = self.decrypt_field(auth_api_key)
-        else:
-            auth_api_key = user_config.get("auth_gateway_api_key", "")
-
-        anthropic_key = user_config.get("anthropic_api_key_encrypted", "")
-        if anthropic_key:
-            anthropic_key = self.decrypt_field(anthropic_key)
-        else:
-            anthropic_key = user_config.get("anthropic_api_key", "")
-
-        openai_key = user_config.get("openai_api_key_encrypted", "")
-        if openai_key:
-            openai_key = self.decrypt_field(openai_key)
-        else:
-            openai_key = user_config.get("openai_api_key", "")
-
+        # Read API keys directly (stored in plaintext for now)
+        auth_api_key = user_config.get("auth_gateway_api_key", "")
+        anthropic_key = user_config.get("anthropic_api_key", "")
+        openai_key = user_config.get("openai_api_key", "")
         openclaw_token = system_config.get("openclaw_token", "test-token-123")
 
         return {
@@ -332,6 +296,11 @@ def main():
         help="Container ID for logging (default: from CONTAINER_ID env var)",
     )
     parser.add_argument(
+        "--config-name",
+        default=os.getenv("CONFIG_NAME", "default"),
+        help="Named configuration to use (default: 'default')",
+    )
+    parser.add_argument(
         "--openclaw-config",
         type=Path,
         default=Path.home() / ".openclaw" / "openclaw.json",
@@ -365,7 +334,9 @@ def main():
         print("ERROR: --user-id is required (or set USER_ID env var)")
         sys.exit(1)
 
-    print(f"=== Fetching config for user_id={args.user_id} ===")
+    print(
+        f"=== Fetching config for user_id={args.user_id}, config_name={args.config_name} ==="
+    )
     if args.container_id:
         print(f"Container ID: {args.container_id}")
 
@@ -376,7 +347,7 @@ def main():
 
     # Fetch configs from DynamoDB
     print("\n[1/4] Fetching user config from DynamoDB...")
-    user_config = fetcher.get_user_config(args.user_id)
+    user_config = fetcher.get_user_config(args.user_id, args.config_name)
 
     print("[2/4] Fetching system config from DynamoDB...")
     system_config = fetcher.get_system_config()

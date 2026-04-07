@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Request, HTTPException
 from typing import List, Optional
 
-from app.models.container import ContainerRequest, ContainerResponse, ContainerHealthResponse
-from app.services import ecs, dynamodb
+from fastapi import APIRouter, HTTPException, Request
+
+from app.models.container import (ContainerHealthResponse, ContainerRequest,
+                                  ContainerResponse)
+from app.services import dynamodb, ecs
 
 router = APIRouter(prefix="/containers", tags=["containers"])
 
@@ -21,18 +23,18 @@ async def create_container(request: Request, req: ContainerRequest):
     Once the task is running and health checks pass, the status will change to RUNNING
     and an IP address will be assigned.
 
-    **Note**: User configuration must exist in DynamoDB before creating a container,
-    otherwise the container will fail to start.
+    The API key from the Authorization header will be stored in DynamoDB for the container
+    to use for authentication with other services. If a named config does not exist, it will
+    be created with default values.
     """
     user_id = request.state.user_id
+    api_key = request.state.api_key
 
-    # Note: User config should already exist in DynamoDB
-    # If not, the container will fail to start
-    # Optional: Validate config exists here before creating container
-
+    # Create container (will auto-create config if not exists)
     container = ecs.create_container(
         user_id=user_id,
-        config=req.config,  # Optional custom config overrides
+        api_key=api_key,
+        config_name=req.config_name or "default",
     )
     return ContainerResponse(
         container_id=container.container_id,

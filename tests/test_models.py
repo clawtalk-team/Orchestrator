@@ -1,7 +1,9 @@
 """Unit tests for models."""
 
-import pytest
 from datetime import datetime
+
+import pytest
+
 from app.models.container import Container, ContainerRequest, HealthData
 
 
@@ -33,11 +35,11 @@ def test_container_request_model():
     """Test ContainerRequest model."""
     req = ContainerRequest(
         name="test-container",
-        config={"key": "value"},
+        config_name="default",
     )
 
     assert req.name == "test-container"
-    assert req.config == {"key": "value"}
+    assert req.config_name == "default"
 
 
 def test_health_data_model():

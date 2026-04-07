@@ -77,6 +77,12 @@ def main():
             "cmd": [python, str(scripts_dir / "delete_containers.py"), "--help"],
             "description": "delete_containers.py --help"
         },
+
+        # Test 6: launch_container.py --help
+        {
+            "cmd": [python, str(scripts_dir / "launch_container.py"), "--help"],
+            "description": "launch_container.py --help"
+        },
     ]
 
     print("\n" + "="*60)

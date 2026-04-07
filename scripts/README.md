@@ -14,7 +14,46 @@ pip install boto3 tabulate
 
 ## Scripts
 
-### 1. List Containers (DynamoDB)
+### 1. Launch Container
+
+Create a new openclaw-agent container via the orchestrator API.
+
+```bash
+# Launch with defaults (production)
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN
+
+# Launch with custom name
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN --name my-agent
+
+# Launch with configuration
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN \
+  --config '{"memory": 512, "cpu": 256}'
+
+# Launch and wait for container to become healthy
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN --wait
+
+# Use local development environment
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN --local
+
+# Use custom URL
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN \
+  --url https://custom-api.example.com
+```
+
+**Options:**
+- `--user-id` - User ID (required for authentication)
+- `--token` - Authentication token (required)
+- `--name` - Optional container name
+- `--config` - Optional configuration as JSON string
+- `--env` - Environment (dev/prod), default: dev
+- `--local` - Use local development URL (localhost:8000)
+- `--url` - Custom base URL (overrides --env and --local)
+- `--wait` - Wait for container to become healthy
+- `--wait-timeout` - Health check timeout in seconds, default: 300
+
+**Note:** Token format is `user_id:token_string` (minimum 20 characters total).
+
+### 2. List Containers (DynamoDB)
 
 List all containers the orchestrator thinks it's managing.
 
@@ -35,7 +74,7 @@ python scripts/list_containers.py --env prod
 - `--profile` - AWS profile name, default: personal
 - `--region` - AWS region, default: ap-southeast-2
 
-### 2. List ECS Tasks
+### 3. List ECS Tasks
 
 List all actual ECS tasks running for openclaw-agent.
 
@@ -53,7 +92,7 @@ python scripts/list_ecs_tasks.py --env prod
 - `--region` - AWS region, default: ap-southeast-2
 - `--cluster` - ECS cluster name, default: openclaw
 
-### 3. Get Logs
+### 4. Get Logs
 
 Fetch CloudWatch logs for a specific container.
 
@@ -80,7 +119,7 @@ python scripts/get_logs.py oc-abc12345 --user-id USER_123 --since 60
 - `--profile` - AWS profile name, default: personal
 - `--region` - AWS region, default: ap-southeast-2
 
-### 4. Execute Shell
+### 5. Execute Shell
 
 Get an interactive shell on a running container.
 
@@ -109,7 +148,7 @@ python scripts/exec_shell.py oc-abc12345 --user-id USER_123 --command "ls -la"
 - ECS exec must be enabled on the task
 - Session Manager plugin must be installed: [Installation Guide](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
 
-### 5. Delete Containers
+### 6. Delete Containers
 
 Stop ECS tasks and remove DynamoDB records.
 
@@ -145,6 +184,22 @@ python scripts/delete_containers.py oc-abc12345 --user-id USER_123 --yes
 - `--cluster` - ECS cluster name, default: openclaw
 
 ## Common Workflows
+
+### Launch and manage a container
+
+```bash
+# 1. Launch a new container
+python scripts/launch_container.py --user-id USER_123 --token YOUR_TOKEN --wait
+
+# 2. Get the container logs
+python scripts/get_logs.py oc-abc12345 --user-id USER_123
+
+# 3. Get a shell to debug
+python scripts/exec_shell.py oc-abc12345 --user-id USER_123
+
+# 4. When done, delete it
+python scripts/delete_containers.py oc-abc12345 --user-id USER_123 --yes
+```
 
 ### Check container status
 

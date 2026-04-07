@@ -8,8 +8,10 @@ from typing import Any, Dict, Optional
 import boto3
 
 from app.config import get_settings
+from app.constants import DEFAULT_LLM_PROVIDER, DEFAULT_OPENCLAW_MODEL
 from app.models.container import Container
 from app.services import dynamodb
+from app.services.user_config import UserConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +46,6 @@ def create_container(
         Container record in PENDING status.
         The actual ECS task creation is async and will be updated when RUNNING.
     """
-    from app.services.user_config import UserConfigService
-
     settings = get_settings()
     container_id = _generate_container_id()
     now = datetime.now(timezone.utc)
@@ -56,9 +56,9 @@ def create_container(
 
     # Set defaults if not present
     if "llm_provider" not in user_config:
-        user_config["llm_provider"] = "anthropic"
+        user_config["llm_provider"] = DEFAULT_LLM_PROVIDER
     if "openclaw_model" not in user_config:
-        user_config["openclaw_model"] = "claude-3-haiku-20240307"
+        user_config["openclaw_model"] = DEFAULT_OPENCLAW_MODEL
 
     # 2. Store api_key in user config (plaintext for now)
     user_config["auth_gateway_api_key"] = api_key

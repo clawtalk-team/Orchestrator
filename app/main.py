@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.middleware.auth import close_auth_client
+
     settings = get_settings()
     if settings.dynamodb_endpoint:
         # Local mode only — in AWS the table is provisioned by Terraform
@@ -27,6 +29,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Could not reach DynamoDB at startup: %s", exc)
     yield
     logger.info("Shutting down orchestrator")
+    await close_auth_client()
 
 
 settings = get_settings()

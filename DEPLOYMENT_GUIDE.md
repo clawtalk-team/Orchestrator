@@ -156,10 +156,10 @@ curl -X POST http://localhost:8000/containers \
 ### Step 4: Verify Config in DynamoDB
 
 ```bash
-# Check that config was stored (replace with your user_id)
+# Check that config was stored (replace <your-user-id> with actual user ID from Step 1)
 aws dynamodb get-item \
   --table-name openclaw-containers \
-  --key '{"pk":{"S":"USER#user-123"},"sk":{"S":"CONFIG#default"}}' \
+  --key '{"pk":{"S":"USER#<your-user-id>"},"sk":{"S":"CONFIG#default"}}' \
   --region ap-southeast-2
 
 # Should see:

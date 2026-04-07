@@ -60,6 +60,7 @@ class Settings(BaseSettings):
 
     # Auth Gateway
     auth_gateway_url: str = "http://localhost:8001"
+    auth_gateway_timeout: float = 5.0  # seconds
 
     # SSM Parameter Store
     ssm_prefix: str = "/clawtalk/orchestrator"

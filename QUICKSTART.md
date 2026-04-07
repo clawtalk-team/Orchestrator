@@ -6,13 +6,13 @@ This guide will get your orchestrator working and launching containers in **5 mi
 
 - ✅ Auth-gateway is deployed and working
 - ✅ DynamoDB table `openclaw-containers` exists
-- ✅ Test API key available: `d3559a7b1882bdf163885165895a048f566ac74d1639f4ef0b49bd698f714930`
+- ✅ Test API key available: `<your-test-api-key>`
 - ⚠️ ECS cluster configured OR local Docker for testing
 
 ## Step 1: Install Dependencies
 
 ```bash
-cd /Users/andrewsinclair/workspace/clawtalk/orchestrator
+cd /path/to/orchestrator
 pip install -r requirements.txt
 ```
 
@@ -84,8 +84,8 @@ table.put_item(Item={
     'user_id': 'YOUR_USER_ID',  # Replace with actual user_id
     'llm_provider': 'anthropic',
     'openclaw_model': 'claude-3-haiku-20240307',
-    'auth_gateway_api_key': 'd3559a7b1882bdf163885165895a048f566ac74d1639f4ef0b49bd698f714930',
-    'anthropic_api_key': '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',
+    'auth_gateway_api_key': '<your-auth-gateway-api-key>',
+    'anthropic_api_key': '<your-anthropic-api-key>',
     'created_at': datetime.utcnow().isoformat(),
     'updated_at': datetime.utcnow().isoformat()
 })

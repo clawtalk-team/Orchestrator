@@ -260,9 +260,9 @@ class UserConfigService:
                 "models": [{"id": "gpt-4", "name": "GPT-4"}],
             }
 
-        openclaw_token = system_config.get(
-            "openclaw_token", os.environ.get("OPENCLAW_GATEWAY_TOKEN", "test-token-123")
-        )
+        openclaw_token = system_config.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+        if not openclaw_token:
+            raise ValueError("openclaw_token must be set in system config or OPENCLAW_GATEWAY_TOKEN environment variable")
 
         return {
             "gateway": {
@@ -301,9 +301,9 @@ class UserConfigService:
         user_config = self.get_user_config(user_id, config_name) or {}
         system_config = self.get_system_config()
 
-        openclaw_token = system_config.get(
-            "openclaw_token", os.environ.get("OPENCLAW_GATEWAY_TOKEN", "test-token-123")
-        )
+        openclaw_token = system_config.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+        if not openclaw_token:
+            raise ValueError("openclaw_token must be set in system config or OPENCLAW_GATEWAY_TOKEN environment variable")
 
         return {
             "agents": [],  # Will be populated after registration

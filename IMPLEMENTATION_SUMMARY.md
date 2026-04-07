@@ -151,7 +151,7 @@ curl -X POST http://localhost:8000/containers \
 ```bash
 aws dynamodb get-item \
   --table-name openclaw-containers \
-  --key '{"pk":{"S":"USER#user-123"},"sk":{"S":"CONFIG#default"}}' \
+  --key '{"pk":{"S":"USER#<user-id>"},"sk":{"S":"CONFIG#default"}}' \
   --endpoint-url http://localhost:8000
 ```
 

@@ -203,7 +203,9 @@ class ConfigFetcher:
             }
 
         openclaw_model = user_config.get("openclaw_model", "claude-3-haiku-20240307")
-        openclaw_token = system_config.get("openclaw_token", "test-token-123")
+        openclaw_token = system_config.get("openclaw_token")
+        if not openclaw_token:
+            raise ValueError("openclaw_token is required in system config")
 
         return {
             "gateway": {

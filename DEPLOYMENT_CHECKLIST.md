@@ -61,7 +61,7 @@ curl -X POST http://staging-orchestrator:8000/containers \
 # Check config was stored correctly
 aws dynamodb get-item \
   --table-name openclaw-containers \
-  --key '{"pk":{"S":"USER#test-user"},"sk":{"S":"CONFIG#default"}}'
+  --key '{"pk":{"S":"USER#<user-id>"},"sk":{"S":"CONFIG#default"}}'
 
 # Verify auth_gateway_api_key is present
 ```
@@ -138,7 +138,7 @@ If auth-gateway is down, temporarily bypass by:
 # Remove test configs created during deployment
 aws dynamodb delete-item \
   --table-name openclaw-containers \
-  --key '{"pk":{"S":"USER#test-user"},"sk":{"S":"CONFIG#default"}}'
+  --key '{"pk":{"S":"USER#<user-id>"},"sk":{"S":"CONFIG#default"}}'
 ```
 
 ## Monitoring & Alerts

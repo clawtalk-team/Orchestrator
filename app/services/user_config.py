@@ -17,9 +17,31 @@ Secrets are stored in plaintext for now.
 import json
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from app.services.dynamodb import _get_table
+
+
+def _convert_decimals(obj: Any) -> Any:
+    """
+    Recursively convert Decimal objects to int or float.
+
+    DynamoDB returns numbers as Decimal objects, but we want to return
+    them as int/float for JSON serialization.
+    """
+    if isinstance(obj, Decimal):
+        # Convert to int if it's a whole number, otherwise float
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_decimals(item) for item in obj]
+    else:
+        return obj
 
 
 class UserConfigService:
@@ -58,20 +80,15 @@ class UserConfigService:
         item = response["Item"]
         config = {}
 
-        # Copy all fields (secrets stored in plaintext for now)
-        for key in [
-            "user_id",
-            "llm_provider",
-            "openclaw_model",
-            "max_containers",
-            "auth_gateway_api_key",
-            "anthropic_api_key",
-            "openai_api_key",
-            "openrouter_api_key",
-            "openclaw_token",
-        ]:
-            if key in item:
-                config[key] = item[key]
+        # Copy all fields except DynamoDB internal fields
+        # This supports arbitrary JSON fields
+        # Exclude None values as well (don't return empty fields)
+        # BUT include created_at and updated_at for the response
+        excluded_fields = {"pk", "sk", "config_type"}
+        for key, value in item.items():
+            if key not in excluded_fields and value is not None:
+                # Convert Decimal objects to int/float for JSON serialization
+                config[key] = _convert_decimals(value)
 
         return config
 
@@ -93,19 +110,24 @@ class UserConfigService:
         """
         now = datetime.now(timezone.utc)
 
+        # Get existing item data to preserve created_at
+        raw_item = self.table.get_item(
+            Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
+        )
+        existing_item_data = raw_item.get("Item")
+
         # If not overwriting, merge with existing config
-        existing_item_data = None
         if not overwrite:
             existing = self.get_user_config(user_id, config_name) or {}
-            # Also get the raw item to preserve created_at
-            raw_item = self.table.get_item(
-                Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
-            )
-            if "Item" in raw_item:
-                existing_item_data = raw_item["Item"]
             # Merge: new values override old ones
             merged = {**existing, **config}
             config = merged
+        else:
+            # When overwriting, delete the old item first to ensure clean slate
+            if existing_item_data:
+                self.table.delete_item(
+                    Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
+                )
 
         item = {
             "pk": f"USER#{user_id}",
@@ -115,21 +137,12 @@ class UserConfigService:
             "updated_at": now.isoformat(),
         }
 
-        # Store all fields in plaintext (no encryption for now)
-        all_fields = [
-            "auth_gateway_api_key",
-            "anthropic_api_key",
-            "openai_api_key",
-            "openrouter_api_key",
-            "openclaw_token",
-            "llm_provider",
-            "openclaw_model",
-            "max_containers",
-        ]
-
-        for field in all_fields:
-            if field in config and config[field]:
-                item[field] = config[field]
+        # Store all fields from config (supports arbitrary JSON fields)
+        # Exclude any fields that shouldn't be stored or would conflict with DynamoDB keys
+        excluded_from_config = {"pk", "sk", "config_type", "created_at", "updated_at"}
+        for key, value in config.items():
+            if key not in excluded_from_config and value is not None:
+                item[key] = value
 
         # Preserve created_at from existing item (fetched earlier if not overwrite)
         if existing_item_data:
@@ -161,12 +174,14 @@ class UserConfigService:
             }
 
         item = response["Item"]
-        return {
+        config = {
             "auth_gateway_url": item.get("auth_gateway_url"),
             "openclaw_url": item.get("openclaw_url"),
             "openclaw_token": item.get("openclaw_token"),
             "voice_gateway_url": item.get("voice_gateway_url"),
         }
+        # Convert any Decimal values to int/float
+        return _convert_decimals(config)
 
     def save_system_config(self, config: Dict[str, Any]) -> None:
         """
@@ -260,9 +275,14 @@ class UserConfigService:
                 "models": [{"id": "gpt-4", "name": "GPT-4"}],
             }
 
-        openclaw_token = system_config.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+        openclaw_token = system_config.get("openclaw_token") or os.environ.get(
+            "OPENCLAW_GATEWAY_TOKEN"
+        )
         if not openclaw_token:
-            raise ValueError("openclaw_token must be set in system config or OPENCLAW_GATEWAY_TOKEN environment variable")
+            raise ValueError(
+                "openclaw_token must be set in system config or "
+                "OPENCLAW_GATEWAY_TOKEN environment variable"
+            )
 
         return {
             "gateway": {
@@ -301,9 +321,14 @@ class UserConfigService:
         user_config = self.get_user_config(user_id, config_name) or {}
         system_config = self.get_system_config()
 
-        openclaw_token = system_config.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+        openclaw_token = system_config.get("openclaw_token") or os.environ.get(
+            "OPENCLAW_GATEWAY_TOKEN"
+        )
         if not openclaw_token:
-            raise ValueError("openclaw_token must be set in system config or OPENCLAW_GATEWAY_TOKEN environment variable")
+            raise ValueError(
+                "openclaw_token must be set in system config or "
+                "OPENCLAW_GATEWAY_TOKEN environment variable"
+            )
 
         return {
             "agents": [],  # Will be populated after registration

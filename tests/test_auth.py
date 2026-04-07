@@ -1,5 +1,7 @@
 """Tests for authentication middleware."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 
@@ -35,15 +37,35 @@ def test_protected_endpoint_with_invalid_auth(client):
     assert response.status_code == 401
 
 
-def test_protected_endpoint_with_valid_auth(client):
+@patch("app.middleware.auth.get_auth_client")
+def test_protected_endpoint_with_valid_auth(mock_get_auth_client, client):
     """Test that valid auth token is accepted."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     headers = {"Authorization": "Bearer test-user:test-token-here"}
     response = client.get("/containers", headers=headers)
     assert response.status_code == 200
 
 
-def test_bearer_token_extraction(client):
+@patch("app.middleware.auth.get_auth_client")
+def test_bearer_token_extraction(mock_get_auth_client, client):
     """Test that bearer token is correctly extracted."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "user-id"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     headers = {"Authorization": "Bearer user-id:token-value-long"}
     response = client.get("/containers", headers=headers)
     assert response.status_code == 200
@@ -71,8 +93,18 @@ def test_short_token_rejected(client):
     assert response.status_code == 401
 
 
-def test_invalid_token_format(client):
+@patch("app.middleware.auth.get_auth_client")
+def test_invalid_token_format(mock_get_auth_client, client):
     """Test that tokens without user_id:token format are rejected."""
+    # Mock auth-gateway response for invalid token
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.json.return_value = {"detail": "Invalid token"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     headers = {"Authorization": "Bearer nocolon1234567890"}
     response = client.get("/containers", headers=headers)
     assert response.status_code == 401

@@ -1,7 +1,7 @@
 """Tests for API routes."""
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -49,8 +49,18 @@ def test_create_container_unauthorized(client):
     assert response.status_code == 401
 
 
-def test_create_container_authorized(authenticated_client):
+@patch("app.middleware.auth.get_auth_client")
+def test_create_container_authorized(mock_get_auth_client, authenticated_client):
     """Test creating a container with authentication."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     with patch("app.services.ecs._get_ecs_client") as mock_ecs:
         mock_ecs.return_value.run_task.return_value = {
             "tasks": [
@@ -82,16 +92,36 @@ def test_create_container_authorized(authenticated_client):
         assert data["status"] == "PENDING"
 
 
-def test_list_containers_empty(authenticated_client):
+@patch("app.middleware.auth.get_auth_client")
+def test_list_containers_empty(mock_get_auth_client, authenticated_client):
     """Test listing containers when none exist."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     response = authenticated_client.get("/containers")
 
     assert response.status_code == 200
     assert response.json() == []
 
 
-def test_list_containers(authenticated_client, sample_container):
+@patch("app.middleware.auth.get_auth_client")
+def test_list_containers(mock_get_auth_client, authenticated_client, sample_container):
     """Test listing containers for a user."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     from app.services import dynamodb
 
     sample_container.user_id = "test-user"
@@ -105,15 +135,35 @@ def test_list_containers(authenticated_client, sample_container):
     assert data[0]["container_id"] == "oc-test123"
 
 
-def test_get_container_not_found(authenticated_client):
+@patch("app.middleware.auth.get_auth_client")
+def test_get_container_not_found(mock_get_auth_client, authenticated_client):
     """Test getting a non-existent container."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     response = authenticated_client.get("/containers/oc-nonexistent")
 
     assert response.status_code == 404
 
 
-def test_get_container(authenticated_client, sample_container):
+@patch("app.middleware.auth.get_auth_client")
+def test_get_container(mock_get_auth_client, authenticated_client, sample_container):
     """Test getting a container."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     from app.services import dynamodb
 
     sample_container.user_id = "test-user"
@@ -127,8 +177,18 @@ def test_get_container(authenticated_client, sample_container):
     assert data["status"] == "RUNNING"
 
 
-def test_delete_container(authenticated_client, sample_container):
+@patch("app.middleware.auth.get_auth_client")
+def test_delete_container(mock_get_auth_client, authenticated_client, sample_container):
     """Test deleting a container."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     from app.services import dynamodb
 
     sample_container.user_id = "test-user"
@@ -142,8 +202,18 @@ def test_delete_container(authenticated_client, sample_container):
         assert response.status_code == 204
 
 
-def test_get_container_health(authenticated_client, sample_container):
+@patch("app.middleware.auth.get_auth_client")
+def test_get_container_health(mock_get_auth_client, authenticated_client, sample_container):
     """Test getting container health status."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     from app.services import dynamodb
 
     sample_container.user_id = "test-user"
@@ -157,8 +227,18 @@ def test_get_container_health(authenticated_client, sample_container):
     assert data["health_status"] == "HEALTHY"
 
 
-def test_access_control_cross_user(authenticated_client, sample_container):
+@patch("app.middleware.auth.get_auth_client")
+def test_access_control_cross_user(mock_get_auth_client, authenticated_client, sample_container):
     """Test that users can only access their own containers."""
+    # Mock auth-gateway response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"user_id": "test-user"}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_get_auth_client.return_value = mock_client
+
     from app.services import dynamodb
 
     # Create container for different user

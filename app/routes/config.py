@@ -1,0 +1,357 @@
+"""
+Configuration API endpoints.
+
+Provides CRUD operations for user and system configurations stored in DynamoDB.
+"""
+
+from typing import List
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
+
+from app.config import get_settings
+from app.models.config import (
+    SystemConfigResponse,
+    SystemConfigUpdate,
+    UserConfigCreate,
+    UserConfigResponse,
+    UserConfigUpdate,
+)
+from app.services.user_config import UserConfigService
+
+router = APIRouter(prefix="/config", tags=["config"])
+
+
+def _is_admin(request: Request) -> bool:
+    """Check if the request is from an admin (master API key)."""
+    settings = get_settings()
+    if not settings.master_api_key:
+        return False
+
+    # Check if the API key matches the master key
+    api_key = getattr(request.state, "api_key", None)
+    if not api_key:
+        return False
+
+    # Constant-time comparison to prevent timing attacks
+    import hmac
+    return hmac.compare_digest(api_key, settings.master_api_key)
+
+
+def _get_user_id(request: Request) -> str:
+    """Extract user_id from request state (set by auth middleware)."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
+    return user_id
+
+
+@router.get(
+    "",
+    response_model=List[UserConfigResponse],
+    response_model_exclude_none=True,
+    summary="List user configurations",
+    response_description="List of all user configurations"
+)
+async def list_user_configs(request: Request) -> List[UserConfigResponse]:
+    """
+    List all configurations for the authenticated user.
+
+    Returns a list of all named configurations owned by the user.
+    """
+    user_id = _get_user_id(request)
+    config_service = UserConfigService()
+
+    # Query DynamoDB for all configs for this user
+    from app.services.dynamodb import _get_table
+
+    table = _get_table()
+    response = table.query(
+        KeyConditionExpression="pk = :pk AND begins_with(sk, :sk_prefix)",
+        ExpressionAttributeValues={
+            ":pk": f"USER#{user_id}",
+            ":sk_prefix": "CONFIG#"
+        }
+    )
+
+    configs = []
+    for item in response.get("Items", []):
+        # Extract config_name from sk (format: CONFIG#{config_name})
+        sk = item.get("sk", "")
+        if not sk.startswith("CONFIG#"):
+            continue
+
+        config_name = sk[7:]  # Remove "CONFIG#" prefix
+        config_data = config_service.get_user_config(user_id, config_name) or {}
+
+        # config_data now includes created_at and updated_at from get_user_config
+        configs.append({
+            "config_name": config_name,
+            "user_id": user_id,
+            **config_data
+        })
+
+    return configs
+
+
+@router.post(
+    "",
+    response_model=UserConfigResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create user configuration",
+    response_description="Created configuration"
+)
+async def create_user_config(
+    request: Request,
+    config: UserConfigCreate
+) -> UserConfigResponse:
+    """
+    Create a new user configuration.
+
+    Creates a named configuration for the authenticated user. The config_name must
+    be unique per user. Arbitrary JSON fields are supported beyond the standard fields.
+    """
+    user_id = _get_user_id(request)
+    config_service = UserConfigService()
+
+    # Check if config already exists
+    existing = config_service.get_user_config(user_id, config.config_name)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Configuration '{config.config_name}' already exists"
+        )
+
+    # Convert to dict and remove config_name (not stored in DynamoDB item)
+    config_dict = config.model_dump(exclude={"config_name"}, exclude_none=True)
+
+    # Save the config
+    config_service.save_user_config(
+        user_id=user_id,
+        config=config_dict,
+        config_name=config.config_name,
+        overwrite=False
+    )
+
+    # Retrieve to get timestamps (get_user_config now includes created_at/updated_at)
+    created_config = config_service.get_user_config(user_id, config.config_name) or {}
+
+    response_data = {
+        "config_name": config.config_name,
+        "user_id": user_id,
+        **created_config
+    }
+
+    return UserConfigResponse(**response_data)
+
+
+@router.get(
+    "/system",
+    response_model=SystemConfigResponse,
+    summary="Get system configuration",
+    response_description="System configuration",
+    responses={403: {"description": "Admin access required"}}
+)
+async def get_system_config(request: Request) -> SystemConfigResponse:
+    """
+    Get system-wide configuration.
+
+    Returns global system defaults. Requires admin access (master API key).
+    """
+    if not _is_admin(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    config_service = UserConfigService()
+    system_config = config_service.get_system_config()
+
+    # Get raw item for timestamp
+    from app.services.dynamodb import _get_table
+
+    table = _get_table()
+    item_response = table.get_item(
+        Key={"pk": "SYSTEM", "sk": "CONFIG#defaults"}
+    )
+
+    raw_item = item_response.get("Item", {})
+    if "updated_at" in raw_item:
+        system_config["updated_at"] = raw_item["updated_at"]
+
+    return SystemConfigResponse(**system_config)
+
+
+@router.get(
+    "/{config_name}",
+    response_model=UserConfigResponse,
+    response_model_exclude_none=True,
+    summary="Get user configuration",
+    response_description="Configuration details",
+    responses={404: {"description": "Configuration not found"}}
+)
+async def get_user_config(
+    request: Request,
+    config_name: str
+) -> UserConfigResponse:
+    """
+    Get a specific user configuration by name.
+
+    Returns the configuration with the given name for the authenticated user.
+    Returns 404 if the configuration does not exist.
+    """
+    user_id = _get_user_id(request)
+    config_service = UserConfigService()
+
+    config_data = config_service.get_user_config(user_id, config_name)
+    if not config_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Configuration '{config_name}' not found"
+        )
+
+    # config_data now includes created_at and updated_at from get_user_config
+    # Add config_name for the response
+    response_data = {
+        "config_name": config_name,
+        **config_data
+    }
+
+    return UserConfigResponse(**response_data)
+
+
+@router.put(
+    "/system",
+    response_model=SystemConfigResponse,
+    summary="Update system configuration",
+    response_description="Updated system configuration",
+    responses={403: {"description": "Admin access required"}}
+)
+async def update_system_config(
+    request: Request,
+    config: SystemConfigUpdate
+) -> SystemConfigResponse:
+    """
+    Update system-wide configuration.
+
+    Updates global system defaults. Requires admin access (master API key).
+    """
+    if not _is_admin(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    config_service = UserConfigService()
+
+    # Convert to dict, excluding None values
+    config_dict = config.model_dump(exclude_none=True)
+
+    # Save system config
+    config_service.save_system_config(config_dict)
+
+    # Retrieve updated config
+    updated_config = config_service.get_system_config()
+
+    # Get raw item for timestamp
+    from app.services.dynamodb import _get_table
+
+    table = _get_table()
+    item_response = table.get_item(
+        Key={"pk": "SYSTEM", "sk": "CONFIG#defaults"}
+    )
+
+    raw_item = item_response.get("Item", {})
+    if "updated_at" in raw_item:
+        updated_config["updated_at"] = raw_item["updated_at"]
+
+    return SystemConfigResponse(**updated_config)
+
+
+@router.put(
+    "/{config_name}",
+    response_model=UserConfigResponse,
+    response_model_exclude_none=True,
+    summary="Update user configuration",
+    response_description="Updated configuration"
+)
+async def update_user_config(
+    request: Request,
+    config_name: str,
+    config: UserConfigUpdate,
+    overwrite: bool = Query(
+        False,
+        description="If true, replace entire config; if false, merge with existing"
+    )
+) -> UserConfigResponse:
+    """
+    Update a user configuration.
+
+    By default, merges with existing configuration (partial update).
+    Use overwrite=true to replace the entire configuration.
+
+    Creates a new configuration if it doesn't exist.
+    """
+    user_id = _get_user_id(request)
+    config_service = UserConfigService()
+
+    # Convert to dict, excluding None values
+    config_dict = config.model_dump(exclude_none=True)
+
+    # Save the config (will merge or overwrite based on parameter)
+    config_service.save_user_config(
+        user_id=user_id,
+        config=config_dict,
+        config_name=config_name,
+        overwrite=overwrite
+    )
+
+    # Retrieve updated config (get_user_config now includes created_at/updated_at)
+    updated_config = config_service.get_user_config(user_id, config_name) or {}
+
+    response_data = {
+        "config_name": config_name,
+        "user_id": user_id,
+        **updated_config
+    }
+
+    return UserConfigResponse(**response_data)
+
+
+@router.delete(
+    "/{config_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete user configuration",
+    responses={404: {"description": "Configuration not found"}}
+)
+async def delete_user_config(
+    request: Request,
+    config_name: str
+) -> None:
+    """
+    Delete a user configuration.
+
+    Permanently deletes the configuration with the given name for the authenticated user.
+    Returns 404 if the configuration does not exist.
+    """
+    user_id = _get_user_id(request)
+    config_service = UserConfigService()
+
+    # Check if config exists
+    existing = config_service.get_user_config(user_id, config_name)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Configuration '{config_name}' not found"
+        )
+
+    # Delete from DynamoDB
+    from app.services.dynamodb import _get_table
+
+    table = _get_table()
+    table.delete_item(
+        Key={"pk": f"USER#{user_id}", "sk": f"CONFIG#{config_name}"}
+    )

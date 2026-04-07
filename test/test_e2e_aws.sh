@@ -46,7 +46,7 @@ API_KEY="$USER_ID:test-token-xyz-789"
 
 # AWS Configuration
 AWS_REGION="${AWS_REGION:-ap-southeast-2}"
-AWS_PROFILE="${AWS_PROFILE:-personal}"
+export AWS_PROFILE="${AWS_PROFILE:-personal}"
 DYNAMODB_TABLE="${DYNAMODB_TABLE:-openclaw-containers}"
 
 # Test mode: "local-with-aws" or "ecs"
@@ -164,7 +164,7 @@ table.put_item(Item={
     'pk': 'SYSTEM',
     'sk': 'CONFIG#defaults',
     'config_type': 'system_config',
-    'auth_gateway_url': 'http://host.docker.internal:8001',
+    'auth_gateway_url': 'http://localhost:8789',
     'openclaw_url': 'http://localhost:18789',
     'openclaw_token': 'test-token-123',
     'voice_gateway_url': 'ws://localhost:9090',
@@ -321,6 +321,7 @@ if [ "$TEST_MODE" = "local-with-aws" ]; then
     export AWS_SESSION_TOKEN=$(aws configure get aws_session_token --profile $AWS_PROFILE 2>/dev/null || echo "")
     export AWS_REGION=$AWS_REGION
     export DYNAMODB_TABLE=$DYNAMODB_TABLE
+    export DYNAMODB_ENDPOINT=""
     export USER_ID=$USER_ID
     export CONTAINER_ID=$CONTAINER_ID
 

@@ -32,13 +32,16 @@ services:
       - "9090:9090"    # Mock voice gateway
     environment:
       # Container identification
-      - USER_ID=test-user-123
-      - CONTAINER_ID=oc-test-e2e-001
+      - USER_ID=${USER_ID:-test-user-123}
+      - CONTAINER_ID=${CONTAINER_ID:-oc-test-e2e-001}
 
       # DynamoDB configuration
-      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - DYNAMODB_ENDPOINT=${DYNAMODB_ENDPOINT:-http://dynamodb-local:8000}
       - DYNAMODB_TABLE=openclaw-containers
       - AWS_REGION=ap-southeast-2
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
 
       # Test mode
       - RUN_MODE=test

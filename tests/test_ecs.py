@@ -163,11 +163,13 @@ def test_handle_task_event_missing_tags(aws_mocks):
 
 def test_store_config_in_ssm():
     """Test storing config in SSM Parameter Store."""
-    with patch("app.services.ecs._get_ssm_client") as mock_ssm:
+    from app.services import config_store
+
+    with patch("app.services.config_store._get_ssm_client") as mock_ssm:
         mock_ssm.return_value.put_parameter.return_value = {}
 
         config = {"key": "value"}
-        result = ecs.store_config_in_ssm("user-123", "oc-test", config)
+        result = config_store.store_config("user-123", "oc-test", config)
 
         assert result == "/clawtalk/orchestrator/user-123/oc-test"
         mock_ssm.return_value.put_parameter.assert_called_once()

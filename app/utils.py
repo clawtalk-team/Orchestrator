@@ -1,9 +1,11 @@
 """Utility functions for the orchestrator service."""
 
 import os
+from functools import lru_cache
 from typing import Optional
 
 
+@lru_cache(maxsize=1)
 def get_git_sha() -> Optional[str]:
     """
     Get the current git commit SHA.

@@ -8,15 +8,25 @@ IMAGE_NAME="orchestrator-health-test:$CURRENT_SHA"
 CONTAINER_NAME="orchestrator-health-test"
 PORT=9999
 
+# Cleanup function
+cleanup() {
+  echo "==> Cleaning up"
+  docker stop $CONTAINER_NAME 2>/dev/null || true
+  docker rm $CONTAINER_NAME 2>/dev/null || true
+}
+
+# Set trap to cleanup on exit
+trap cleanup EXIT
+
 echo "==> Building Docker image with GIT_COMMIT=$CURRENT_SHA"
 docker build \
   --build-arg GIT_COMMIT=$CURRENT_SHA \
   -f Dockerfile \
   -t $IMAGE_NAME \
-  . > /dev/null
+  .
 
 echo "==> Verifying GIT_COMMIT is baked into image"
-BAKED_SHA=$(docker inspect $IMAGE_NAME | grep -A 20 '"Env":' | grep GIT_COMMIT | cut -d'=' -f2 | tr -d '", ')
+BAKED_SHA=$(docker inspect $IMAGE_NAME --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^GIT_COMMIT=' | cut -d'=' -f2)
 if [ "$BAKED_SHA" != "$CURRENT_SHA" ]; then
   echo "❌ FAILED: GIT_COMMIT in image ($BAKED_SHA) doesn't match expected ($CURRENT_SHA)"
   exit 1
@@ -24,19 +34,31 @@ fi
 echo "✓ GIT_COMMIT correctly baked into image: $BAKED_SHA"
 
 echo "==> Starting container on port $PORT"
-docker run -d --name $CONTAINER_NAME -p $PORT:8571 $IMAGE_NAME > /dev/null
-sleep 5
+docker run -d --name $CONTAINER_NAME -p $PORT:8571 $IMAGE_NAME
+
+# Wait for container to be healthy with retry loop
+echo "==> Waiting for container to be ready"
+MAX_RETRIES=30
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+  if curl -sf http://localhost:$PORT/health > /dev/null 2>&1; then
+    echo "✓ Container is ready"
+    break
+  fi
+  RETRY_COUNT=$((RETRY_COUNT + 1))
+  if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "❌ FAILED: Container did not become ready within 30 seconds"
+    docker logs $CONTAINER_NAME
+    exit 1
+  fi
+  sleep 1
+done
 
 echo "==> Testing /health endpoint"
 RESPONSE=$(curl -s http://localhost:$PORT/health)
 RETURNED_SHA=$(echo $RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin).get('git_sha', 'null'))")
 
 echo "==> Response: $RESPONSE"
-
-# Cleanup
-echo "==> Cleaning up"
-docker stop $CONTAINER_NAME > /dev/null
-docker rm $CONTAINER_NAME > /dev/null
 
 # Verify
 if [ "$RETURNED_SHA" = "$CURRENT_SHA" ]; then

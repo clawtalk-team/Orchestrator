@@ -444,16 +444,12 @@ def main():
         print_info("These are the env vars that ECS will pass to the container:")
 
         container_env = {
-            "USER_ID": user_id,
+            "API_KEY": f"{api_key[:20]}...{api_key[-10:]}",
             "CONTAINER_ID": container_id,
             "CONFIG_NAME": "default",
-            "DYNAMODB_TABLE": DYNAMODB_TABLE,
-            "DYNAMODB_REGION": DYNAMODB_REGION,
+            "ORCHESTRATOR_URL": ORCHESTRATOR_URL,
             "OPENCLAW_DISABLE_BONJOUR": "1",
         }
-
-        if DYNAMODB_ENDPOINT:
-            container_env["DYNAMODB_ENDPOINT"] = DYNAMODB_ENDPOINT
 
         print_json("Container Environment Variables", container_env)
 
@@ -643,21 +639,22 @@ def main():
         print_success(f"Container requested: {container_id}")
         print_info(f"Container status: {container_data['status']}")
 
-        print("\n" + BOLD + "What happens next (in AWS ECS):" + RESET)
+        print("\n" + BOLD + "What happens next (API-based config flow):" + RESET)
         print("1. ECS Fargate task launches in AWS (clawtalk-dev cluster)")
-        print("2. Container startup script runs with these env vars:")
+        print("2. Container receives environment variables:")
         print(f"   - API_KEY=<user's auth_gateway_api_key>")
         print(f"   - CONTAINER_ID={container_id}")
         print("   - CONFIG_NAME=default")
         print(f"   - ORCHESTRATOR_URL={ORCHESTRATOR_URL}")
+        print("   - OPENCLAW_DISABLE_BONJOUR=1")
         print("3. Container calls orchestrator config API:")
-        print(f"   - GET {ORCHESTRATOR_URL}/config/default")
-        print("   - Authorization: Bearer <API_KEY>")
-        print("4. Orchestrator returns user configuration with:")
+        print(f"   GET {ORCHESTRATOR_URL}/config/default")
+        print(f"   Authorization: Bearer <API_KEY>")
+        print("4. Orchestrator fetches user config from DynamoDB and returns:")
         print("   - llm_provider, anthropic_api_key")
         print("   - auth_gateway_url, auth_gateway_api_key")
         print("   - openclaw_url, openclaw_model, etc.")
-        print("5. Container validates config and writes files:")
+        print("5. Container writes configuration files:")
         print("   - ~/.openclaw/openclaw.json (OpenClaw gateway config)")
         print("   - ~/.clawtalk/clawtalk.json (openclaw-agent config)")
         print("6. Container starts OpenClaw gateway and openclaw-agent")

@@ -25,7 +25,7 @@ router = APIRouter(tags=["health"])
     summary="Service health check",
     response_description="Service is healthy",
 )
-async def health():
+def health():
     """
     Health check endpoint for the orchestrator service.
 

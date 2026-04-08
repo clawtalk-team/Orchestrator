@@ -8,6 +8,7 @@ This directory contains the documentation for the orchestrator service.
 
 - **[../README.md](../README.md)** - Main project README
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Deployment guide for AWS infrastructure
+- **[CONFIG_API.md](CONFIG_API.md)** - Configuration API reference and parameter documentation
 
 ### Testing
 
@@ -16,6 +17,7 @@ This directory contains the documentation for the orchestrator service.
 
 ### Implementation Details
 
+- **[CONFIG_API.md](CONFIG_API.md)** - Configuration API reference with complete parameter documentation
 - **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Summary of the DynamoDB config delivery implementation
 - **[CONTAINER_REQUIREMENTS.md](CONTAINER_REQUIREMENTS.md)** - Requirements for container configuration based on openclaw-agent
 
@@ -27,12 +29,14 @@ orchestrator/
 ├── docs/
 │   ├── README.md                      # This file
 │   ├── DEPLOYMENT.md                  # Deployment instructions
+│   ├── CONFIG_API.md                  # Configuration API reference
 │   ├── E2E_TEST_GUIDE.md             # Testing guide
 │   ├── AWS_E2E_TEST_RESULTS.md       # Test results
 │   ├── IMPLEMENTATION_SUMMARY.md      # Implementation overview
 │   └── CONTAINER_REQUIREMENTS.md      # Container requirements
 ├── scripts/
-│   └── README.md                      # Scripts documentation
+│   ├── README.md                      # Scripts documentation
+│   └── load_defaults.py               # Load default configs into DynamoDB
 └── test/
     └── README.md                      # Test documentation
 ```

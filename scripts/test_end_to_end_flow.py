@@ -442,7 +442,7 @@ def main():
         print_info("These are the env vars that ECS will pass to the container:")
 
         container_env = {
-            "API_KEY": f"{api_key[:20]}...{api_key[-10:]}",  # Masked for display
+            "API_KEY": f"{api_key}",  
             "CONTAINER_ID": container_id,
             "CONFIG_NAME": "default",
             "ORCHESTRATOR_URL": ORCHESTRATOR_URL,

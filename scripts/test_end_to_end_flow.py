@@ -46,14 +46,12 @@ load_dotenv()
 
 # AWS Lambda endpoint for auth-gateway
 AUTH_GATEWAY_URL = os.getenv(
-    "AUTH_GATEWAY_URL",
-    "https://z1fm1cdkph.execute-api.ap-southeast-2.amazonaws.com"
+    "AUTH_GATEWAY_URL", "https://z1fm1cdkph.execute-api.ap-southeast-2.amazonaws.com"
 )
 
 # AWS Lambda endpoint for orchestrator
 ORCHESTRATOR_URL = os.getenv(
-    "ORCHESTRATOR_URL",
-    "https://prz6mum7c7.execute-api.ap-southeast-2.amazonaws.com"
+    "ORCHESTRATOR_URL", "https://prz6mum7c7.execute-api.ap-southeast-2.amazonaws.com"
 )
 
 # DynamoDB Configuration (AWS - no endpoint for real DynamoDB)
@@ -234,9 +232,7 @@ def query_dynamodb_config(user_id: str, config_name: str = "default") -> Optiona
 
         # Get system config
         print_info("Fetching SYSTEM config from DynamoDB...")
-        system_response = table.get_item(
-            Key={"pk": "SYSTEM", "sk": "CONFIG#defaults"}
-        )
+        system_response = table.get_item(Key={"pk": "SYSTEM", "sk": "CONFIG#defaults"})
 
         config = {
             "user_config": user_response.get("Item"),
@@ -249,7 +245,9 @@ def query_dynamodb_config(user_id: str, config_name: str = "default") -> Optiona
             masked_config = dict(user_response["Item"])
             for key in ["anthropic_api_key", "openai_api_key", "auth_gateway_api_key"]:
                 if key in masked_config and masked_config[key]:
-                    masked_config[key] = f"{masked_config[key][:10]}...{masked_config[key][-4:]}"
+                    masked_config[
+                        key
+                    ] = f"{masked_config[key][:10]}...{masked_config[key][-4:]}"
             print_json("User Config (masked)", masked_config)
         else:
             print_warning("No user config found in DynamoDB")
@@ -444,7 +442,7 @@ def main():
         print_info("These are the env vars that ECS will pass to the container:")
 
         container_env = {
-            "API_KEY": f"{api_key[:20]}...{api_key[-10:]}",
+            "API_KEY": f"{api_key[:20]}...{api_key[-10:]}",  # Masked for display
             "CONTAINER_ID": container_id,
             "CONFIG_NAME": "default",
             "ORCHESTRATOR_URL": ORCHESTRATOR_URL,
@@ -504,7 +502,9 @@ def main():
 
             time.sleep(poll_interval)
         else:
-            print_warning(f"Container did not reach RUNNING state in {max_attempts * poll_interval}s")
+            print_warning(
+                f"Container did not reach RUNNING state in {max_attempts * poll_interval}s"
+            )
             print_info("This is expected for ECS deployments that take time to spin up")
 
         # ====================================================================
@@ -530,21 +530,20 @@ def main():
 
             # List tasks and find the one for this container
             tasks_response = ecs_client.list_tasks(
-                cluster=ECS_CLUSTER_NAME,
-                desiredStatus="RUNNING"
+                cluster=ECS_CLUSTER_NAME, desiredStatus="RUNNING"
             )
 
             task_arn = None
             if tasks_response["taskArns"]:
                 # Get task details to find our container
                 tasks = ecs_client.describe_tasks(
-                    cluster=ECS_CLUSTER_NAME,
-                    tasks=tasks_response["taskArns"]
+                    cluster=ECS_CLUSTER_NAME, tasks=tasks_response["taskArns"]
                 )
 
                 # Find task that was started around the same time as our container
                 # (within 60 seconds of container creation)
                 from dateutil import parser as date_parser
+
                 container_created = date_parser.parse(container_data["created_at"])
 
                 for task in tasks["tasks"]:
@@ -580,7 +579,7 @@ def main():
                         streams_response = logs_client.describe_log_streams(
                             logGroupName=log_group,
                             logStreamNamePrefix=log_stream_prefix,
-                            limit=1
+                            limit=1,
                         )
 
                         if not streams_response["logStreams"]:
@@ -588,14 +587,16 @@ def main():
                             time.sleep(5)
                             continue
 
-                        log_stream_name = streams_response["logStreams"][0]["logStreamName"]
+                        log_stream_name = streams_response["logStreams"][0][
+                            "logStreamName"
+                        ]
 
                         # Fetch log events
                         get_logs_kwargs = {
                             "logGroupName": log_group,
                             "logStreamName": log_stream_name,
                             "startFromHead": True,
-                            "limit": 100
+                            "limit": 100,
                         }
 
                         if last_timestamp:
@@ -639,22 +640,21 @@ def main():
         print_success(f"Container requested: {container_id}")
         print_info(f"Container status: {container_data['status']}")
 
-        print("\n" + BOLD + "What happens next (API-based config flow):" + RESET)
+        print("\n" + BOLD + "What happens next (in AWS ECS):" + RESET)
         print("1. ECS Fargate task launches in AWS (clawtalk-dev cluster)")
-        print("2. Container receives environment variables:")
+        print("2. Container startup script runs with these env vars:")
         print(f"   - API_KEY=<user's auth_gateway_api_key>")
         print(f"   - CONTAINER_ID={container_id}")
         print("   - CONFIG_NAME=default")
         print(f"   - ORCHESTRATOR_URL={ORCHESTRATOR_URL}")
-        print("   - OPENCLAW_DISABLE_BONJOUR=1")
         print("3. Container calls orchestrator config API:")
-        print(f"   GET {ORCHESTRATOR_URL}/config/default")
-        print(f"   Authorization: Bearer <API_KEY>")
-        print("4. Orchestrator fetches user config from DynamoDB and returns:")
+        print(f"   - GET {ORCHESTRATOR_URL}/config/default")
+        print("   - Authorization: Bearer <API_KEY>")
+        print("4. Orchestrator returns user configuration with:")
         print("   - llm_provider, anthropic_api_key")
         print("   - auth_gateway_url, auth_gateway_api_key")
         print("   - openclaw_url, openclaw_model, etc.")
-        print("5. Container writes configuration files:")
+        print("5. Container validates config and writes files:")
         print("   - ~/.openclaw/openclaw.json (OpenClaw gateway config)")
         print("   - ~/.clawtalk/clawtalk.json (openclaw-agent config)")
         print("6. Container starts OpenClaw gateway and openclaw-agent")

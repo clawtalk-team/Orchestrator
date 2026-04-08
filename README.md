@@ -249,7 +249,7 @@ curl -X POST https://prz6mum7c7.execute-api.ap-southeast-2.amazonaws.com/config 
 
 ```python
 import boto3
-from datetime import datetime
+from datetime import datetime, timezone
 
 dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-2')
 table = dynamodb.Table('openclaw-containers')
@@ -263,7 +263,7 @@ table.put_item(Item={
     'openclaw_url': 'http://localhost:18789',
     'openclaw_token': 'test-token-123',
     'voice_gateway_url': 'ws://localhost:9090',
-    'updated_at': datetime.utcnow().isoformat()
+    'updated_at': datetime.now(timezone.utc).isoformat()
 })
 
 # User config
@@ -276,8 +276,8 @@ table.put_item(Item={
     'openclaw_model': 'claude-3-haiku-20240307',
     'auth_gateway_api_key': 'your-auth-key',
     'anthropic_api_key': 'sk-ant-...',
-    'created_at': datetime.utcnow().isoformat(),
-    'updated_at': datetime.utcnow().isoformat()
+    'created_at': datetime.now(timezone.utc).isoformat(),
+    'updated_at': datetime.now(timezone.utc).isoformat()
 })
 ```
 

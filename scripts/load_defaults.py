@@ -25,9 +25,8 @@ Usage:
 """
 
 import argparse
-import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import boto3
@@ -68,7 +67,7 @@ def load_system_defaults(
         "openclaw_url": {"S": openclaw_url},
         "openclaw_token": {"S": openclaw_token},
         "voice_gateway_url": {"S": voice_gateway_url},
-        "updated_at": {"S": datetime.utcnow().isoformat()},
+        "updated_at": {"S": datetime.now(timezone.utc).isoformat()},
     }
 
     try:
@@ -106,8 +105,8 @@ def load_user_defaults(
         "user_id": {"S": user_id},
         "llm_provider": {"S": llm_provider},
         "openclaw_model": {"S": openclaw_model},
-        "created_at": {"S": datetime.utcnow().isoformat()},
-        "updated_at": {"S": datetime.utcnow().isoformat()},
+        "created_at": {"S": datetime.now(timezone.utc).isoformat()},
+        "updated_at": {"S": datetime.now(timezone.utc).isoformat()},
     }
 
     # Add API keys if provided

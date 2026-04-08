@@ -38,11 +38,14 @@ def get_containers(
 
     if user_id:
         print(f"==> Fetching containers for user {user_id}...")
-        # Query specific user's containers
+        # Query specific user's containers (filter by CONTAINER# to avoid deleting configs)
         query_kwargs = {
             "TableName": table_name,
-            "KeyConditionExpression": "pk = :pk",
-            "ExpressionAttributeValues": {":pk": {"S": f"USER#{user_id}"}},
+            "KeyConditionExpression": "pk = :pk AND begins_with(sk, :sk_prefix)",
+            "ExpressionAttributeValues": {
+                ":pk": {"S": f"USER#{user_id}"},
+                ":sk_prefix": {"S": "CONTAINER#"}
+            },
         }
         if status:
             query_kwargs["FilterExpression"] = "#s = :status"
@@ -198,8 +201,6 @@ def main():
     # Validate arguments
     if args.container_ids and not args.user_id:
         parser.error("--user-id is required when specifying container IDs")
-    if args.status and not args.user_id:
-        parser.error("--user-id is required when using --status")
 
     # Determine which containers to delete
     containers_to_delete = []

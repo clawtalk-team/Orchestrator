@@ -103,11 +103,15 @@ def create_container(
         ]
 
         # Add user-provided environment variables, deduplicating by key
+        # Protected keys cannot be overridden by user-supplied env vars
         if env_vars:
+            protected_keys = {"API_KEY", "CONTAINER_ID", "CONFIG_NAME", "ORCHESTRATOR_URL"}
+            filtered_vars = {k: v for k, v in env_vars.items() if k not in protected_keys}
             env_dict = {e["name"]: e["value"] for e in environment}
-            env_dict.update(env_vars)
+            env_dict.update(filtered_vars)
             environment = [{"name": k, "value": v} for k, v in env_dict.items()]
-            logger.info(f"Added {len(env_vars)} custom env vars to container {container_id}")
+            if filtered_vars:
+                logger.info("Added %d custom env vars to container %s", len(filtered_vars), container_id)
 
         overrides = {
             "containerOverrides": [
@@ -169,6 +173,9 @@ def create_container(
                 container_id,
                 response,
             )
+            container.status = "FAILED"
+            container.updated_at = datetime.now(timezone.utc)
+            dynamodb.update_container(container)
     except Exception as e:
         # If task creation fails, mark container as FAILED
         logger.exception("create_container ECS error: container=%s error=%s", container_id, e)

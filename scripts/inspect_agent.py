@@ -303,7 +303,7 @@ Examples:
 
     parser.add_argument("agent_id", help="Agent/container ID (UUID or oc- format)")
     parser.add_argument("--env", default="dev", help="Environment (dev/prod)")
-    parser.add_argument("--profile", default="personal", help="AWS profile name")
+    parser.add_argument("--profile", default=None, help="AWS profile name")
     parser.add_argument("--region", default="ap-southeast-2", help="AWS region")
     parser.add_argument(
         "--logs", action="store_true", help="Fetch CloudWatch logs"

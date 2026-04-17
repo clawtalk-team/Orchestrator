@@ -102,10 +102,11 @@ def create_container(
             {"name": "OPENCLAW_DISABLE_BONJOUR", "value": "1"},
         ]
 
-        # Add user-provided environment variables
+        # Add user-provided environment variables, deduplicating by key
         if env_vars:
-            for key, value in env_vars.items():
-                environment.append({"name": key, "value": value})
+            env_dict = {e["name"]: e["value"] for e in environment}
+            env_dict.update(env_vars)
+            environment = [{"name": k, "value": v} for k, v in env_dict.items()]
             logger.info(f"Added {len(env_vars)} custom env vars to container {container_id}")
 
         overrides = {

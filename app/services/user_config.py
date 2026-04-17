@@ -188,9 +188,9 @@ class UserConfigService:
             # This prevents stale DynamoDB values (e.g. from local testing) from overriding
             # the correctly-configured env vars in a production deployment.
             "auth_gateway_url": os.environ.get("AUTH_GATEWAY_URL") or item.get("auth_gateway_url") or settings.auth_gateway_url,
-            "openclaw_url": os.environ.get("OPENCLAW_URL") or item.get("openclaw_url"),
+            "openclaw_url": os.environ.get("OPENCLAW_URL") or item.get("openclaw_url") or settings.openclaw_url,
             "openclaw_token": os.environ.get("OPENCLAW_GATEWAY_TOKEN") or item.get("openclaw_token"),
-            "voice_gateway_url": os.environ.get("VOICE_GATEWAY_URL") or item.get("voice_gateway_url"),
+            "voice_gateway_url": os.environ.get("VOICE_GATEWAY_URL") or item.get("voice_gateway_url") or settings.voice_gateway_url,
             "updated_at": item.get("updated_at"),
         }
         # Strip keys that are still None so callers get a clean dict

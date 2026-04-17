@@ -1011,6 +1011,9 @@ class TestSystemConfigFallback:
         """None values from system config are not included in merged response."""
         monkeypatch.setenv("MASTER_API_KEY", "master-key")
         monkeypatch.delenv("AUTH_GATEWAY_URL", raising=False)
+        monkeypatch.delenv("OPENCLAW_URL", raising=False)
+        monkeypatch.delenv("OPENCLAW_GATEWAY_TOKEN", raising=False)
+        monkeypatch.delenv("VOICE_GATEWAY_URL", raising=False)
 
         from app.config import get_settings
         get_settings.cache_clear()
@@ -1028,8 +1031,9 @@ class TestSystemConfigFallback:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["auth_gateway_url"] == "https://auth.example.com"
-        # Missing fields should not appear as null — they should be absent
-        assert "openclaw_url" not in data
+        # openclaw_url falls back to the Settings default when not in DynamoDB or env
+        assert data["openclaw_url"] == "http://localhost:18789"
+        # openclaw_token has no default — must be absent when not configured
         assert "openclaw_token" not in data
 
         get_settings.cache_clear()

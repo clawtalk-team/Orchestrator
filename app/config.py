@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     auth_gateway_url: str = "http://localhost:8001"
     auth_gateway_timeout: float = 5.0  # seconds
 
+    # OpenClaw / Voice Gateway
+    openclaw_url: str = "http://localhost:18789"
+    voice_gateway_url: str = "ws://localhost:9090"
+    # openclaw_gateway_token is intentionally excluded — it's a secret and has no
+    # safe local default. Set OPENCLAW_GATEWAY_TOKEN env var or DynamoDB system config.
+
     # Orchestrator API URL (for containers to fetch config)
     orchestrator_url: str = "http://localhost:8000"
 

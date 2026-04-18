@@ -208,7 +208,7 @@ python scripts/delete_containers.py oc-abc12345 --user-id USER_123 --yes
 python scripts/list_containers.py
 
 # 2. List actual running tasks in ECS
-python scripts/list_ecs_tasks.py
+python scripts/ecs_tasks.py list
 
 # 3. Compare to find discrepancies
 ```
@@ -241,6 +241,193 @@ python scripts/delete_containers.py --user-id USER_123 --status STOPPED
 ```bash
 # Follow logs for a specific container
 python scripts/get_logs.py oc-abc12345 --user-id USER_123 --follow
+```
+
+## ECS Task Management Scripts
+
+### 7. ECS Tasks (`ecs_tasks.py`)
+
+Single entry point for interrogating and cleaning up ECS tasks. Replaces `list_ecs_tasks.py`, `delete_all_running_tasks.py`, and `cleanup_tasks.py`.
+
+**Common options (all subcommands):**
+- `--env` - Environment (dev/prod), default: dev
+- `--cluster` - ECS cluster name (default: clawtalk-{env})
+- `--profile` - AWS profile, default: personal
+- `--region` - AWS region, default: ap-southeast-2
+
+#### `list` — show all tasks in the cluster
+
+```bash
+python scripts/ecs_tasks.py list
+python scripts/ecs_tasks.py list --env prod
+```
+
+Displays a table of task ID, status, container ID, user ID, IP address, and start time, plus a count by status.
+
+#### `stop-all` — stop all running tasks
+
+```bash
+# Dry run — see what would be stopped
+python scripts/ecs_tasks.py stop-all --dry-run
+
+# Stop all running tasks
+python scripts/ecs_tasks.py stop-all
+
+# Stop all running tasks and remove DynamoDB records
+python scripts/ecs_tasks.py stop-all --cleanup-db
+
+# Prod environment
+python scripts/ecs_tasks.py stop-all --env prod --cleanup-db
+```
+
+**Extra options:**
+- `--cleanup-db` - Also delete container records from DynamoDB
+- `--dry-run` - Show what would happen without making changes
+
+#### `cleanup` — remove PENDING and FAILED tasks
+
+Scans DynamoDB for PENDING and FAILED containers, stops any still-running ECS tasks, and deletes the DynamoDB records.
+
+```bash
+# Dry run
+python scripts/ecs_tasks.py cleanup --dry-run
+
+# Remove all pending/failed containers
+python scripts/ecs_tasks.py cleanup
+
+# Prod environment
+python scripts/ecs_tasks.py cleanup --env prod
+```
+
+**Extra options:**
+- `--dry-run` - Show what would happen without making changes
+
+### 8. Inspect Agent
+
+Diagnose a failed or stuck container by looking up its DynamoDB record, ECS task status, Lambda invocations, and CloudWatch logs in one shot. Accepts either a full UUID or an `oc-` container ID.
+
+```bash
+# Inspect by container ID
+python scripts/inspect_agent.py oc-e20ac9f1
+
+# Inspect by full ECS task UUID
+python scripts/inspect_agent.py e20ac9f1-2d3a-462c-9a37-205779ac0e0a
+
+# Include CloudWatch logs (last 60 minutes)
+python scripts/inspect_agent.py oc-e20ac9f1 --logs
+
+# Include logs with custom window
+python scripts/inspect_agent.py oc-e20ac9f1 --logs --since 120
+
+# Use prod environment
+python scripts/inspect_agent.py oc-e20ac9f1 --env prod
+```
+
+**Options:**
+- `--env` - Environment (dev/prod), default: dev
+- `--profile` - AWS profile name
+- `--region` - AWS region, default: ap-southeast-2
+- `--logs` - Fetch CloudWatch logs
+- `--since` - Log window in minutes, default: 60
+- `--cluster` - ECS cluster name (default: clawtalk-{env})
+
+**What it shows:**
+1. DynamoDB record (status, IP, task ARN, timestamps)
+2. ECS task status (last status, exit code, stopped reason)
+3. Orchestrator Lambda invocations around creation time
+4. CloudWatch container logs (if `--logs` passed)
+
+## Configuration Scripts
+
+### 10. Load Defaults
+
+Populate DynamoDB with system-wide and user-specific default configuration to bootstrap the orchestrator.
+
+```bash
+# Load system defaults only
+python scripts/load_defaults.py --system
+
+# Load system + user defaults
+python scripts/load_defaults.py --system --user-id YOUR_USER_ID \
+  --auth-gateway-url https://z1fm1cdkph.execute-api.ap-southeast-2.amazonaws.com \
+  --openclaw-url http://localhost:18789 \
+  --openclaw-token test-token-123 \
+  --llm-provider anthropic \
+  --openclaw-model claude-3-haiku-20240307 \
+  --auth-gateway-api-key YOUR_API_KEY \
+  --anthropic-api-key sk-ant-...
+
+# Verify existing configs
+python scripts/load_defaults.py --verify --user-id YOUR_USER_ID
+```
+
+**Options:**
+- `--system` - Load system-wide defaults
+- `--user-id` - User ID for user-specific config
+- `--auth-gateway-url` - Auth gateway endpoint
+- `--openclaw-url` - OpenClaw gateway URL
+- `--openclaw-token` - Shared OpenClaw token
+- `--llm-provider` - LLM provider (anthropic/openai/openrouter)
+- `--openclaw-model` - Default model
+- `--auth-gateway-api-key` - User's auth gateway API key
+- `--anthropic-api-key` / `--openai-api-key` / `--openrouter-api-key` - Provider keys
+- `--verify` - Print existing configs without writing
+- `--env` - Environment (dev/prod), default: dev
+- `--profile` - AWS profile, default: personal
+- `--region` - AWS region, default: ap-southeast-2
+
+### 11. Verify AWS Config
+
+Quick pre-flight check before running tests. Verifies AWS credentials, auth-gateway accessibility, orchestrator endpoint, DynamoDB table, and ECS cluster.
+
+```bash
+python scripts/verify_aws_config.py
+```
+
+Reads configuration from `.env` in the project root.
+
+### 12. Setup Test Config
+
+Create test system and user configs in DynamoDB for local or AWS E2E testing.
+
+```bash
+# Local DynamoDB
+python scripts/setup_test_config.py \
+  --user-id test-user-123 \
+  --anthropic-key sk-ant-...
+
+# AWS DynamoDB
+python scripts/setup_test_config.py \
+  --user-id test-user-123 \
+  --anthropic-key sk-ant-... \
+  --endpoint https://dynamodb.ap-southeast-2.amazonaws.com
+```
+
+## Setup Scripts
+
+### 13. Setup and Test (`setup_and_test.sh`)
+
+Bootstraps a development environment: verifies the API key with auth-gateway, creates system and user configs in DynamoDB, and runs a test container creation.
+
+```bash
+bash scripts/setup_and_test.sh
+```
+
+### 14. Auth-Gateway Integration Test (`test_auth_gateway_integration.sh`)
+
+Smoke tests the orchestrator's auth-gateway integration — creates a user, validates the API key, and creates a container.
+
+```bash
+bash scripts/test_auth_gateway_integration.sh
+```
+
+### 15. EventBridge Rule Setup (`setup_eventbridge_rule.sh`)
+
+Creates the EventBridge rule that triggers the orchestrator Lambda on ECS task state changes (RUNNING/STOPPED), enabling DynamoDB status updates.
+
+```bash
+bash scripts/setup_eventbridge_rule.sh
+bash scripts/test_eventbridge_rule.sh  # Verify the rule fires
 ```
 
 ## Testing Scripts
@@ -303,3 +490,20 @@ python scripts/test_end_to_end_flow.py
 - Understanding what config gets transferred to containers
 - Validating DynamoDB config storage
 - Demonstrating the system to new developers
+
+### test_config_api_only.py
+
+Smoke tests the Config API endpoints (create, list, get) without spinning up containers or AWS ECS resources. Requires the orchestrator to be running.
+
+```bash
+python scripts/test_config_api_only.py
+```
+
+### test_integration.py / test_scripts.py
+
+Validate the management scripts themselves — argument parsing, error handling, and basic behaviour without making real AWS API calls.
+
+```bash
+python scripts/test_integration.py
+python scripts/test_scripts.py
+```

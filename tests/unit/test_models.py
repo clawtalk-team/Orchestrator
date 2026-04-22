@@ -49,10 +49,11 @@ def test_health_data_model():
 
 def test_container_request_model():
     """Test ContainerRequest model."""
-    request = ContainerRequest(name="test-container", config_name="default")
+    request = ContainerRequest(name="test-container", config_name="default", agent_id="agent-abc123")
 
     assert request.name == "test-container"
     assert request.config_name == "default"
+    assert request.agent_id == "agent-abc123"
 
 
 def test_container_response_model():

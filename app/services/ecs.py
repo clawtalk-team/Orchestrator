@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import boto3
+import httpx
 
 from app.config import get_settings
 from app.constants import DEFAULT_LLM_PROVIDER, DEFAULT_OPENCLAW_MODEL
@@ -25,10 +26,45 @@ def _generate_container_id() -> str:
     return f"oc-{uuid.uuid4().hex[:8]}"
 
 
+def _update_agent_container(user_id: str, agent_id: str, container_id: str, api_key: str) -> None:
+    """Notify auth-gateway of the container assigned to an agent."""
+    settings = get_settings()
+    url = f"{settings.auth_gateway_url}/users/{user_id}/agents/{agent_id}"
+    try:
+        response = httpx.put(
+            url,
+            json={"container_id": container_id},
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=settings.auth_gateway_timeout,
+        )
+        if response.status_code == 200:
+            logger.info(
+                "agent container updated: agent=%s container=%s",
+                agent_id,
+                container_id,
+            )
+        else:
+            logger.warning(
+                "agent container update failed: agent=%s container=%s status=%s body=%s",
+                agent_id,
+                container_id,
+                response.status_code,
+                response.text,
+            )
+    except httpx.RequestError as e:
+        logger.error(
+            "agent container update error: agent=%s container=%s error=%s",
+            agent_id,
+            container_id,
+            e,
+        )
+
+
 def create_container(
     user_id: str,
     api_key: str,
     config_name: str = "default",
+    agent_id: Optional[str] = None,
     env_vars: Optional[Dict[str, str]] = None,
 ) -> Container:
     """
@@ -41,6 +77,7 @@ def create_container(
         user_id: The user ID
         api_key: The API key for auth-gateway (from Authorization header)
         config_name: Named configuration to use (default: "default")
+        agent_id: Optional agent ID to run in the container
         env_vars: Additional environment variables to pass to the container
 
     Returns:
@@ -80,6 +117,7 @@ def create_container(
         user_id=user_id,
         task_arn="",  # Will be updated when task starts
         status="PENDING",
+        agent_id=agent_id,
         health_status="UNKNOWN",
         created_at=now,
         updated_at=now,
@@ -102,10 +140,13 @@ def create_container(
             {"name": "OPENCLAW_DISABLE_BONJOUR", "value": "1"},
         ]
 
+        if agent_id:
+            environment.append({"name": "AGENT_ID", "value": agent_id})
+
         # Add user-provided environment variables, deduplicating by key
         # Protected keys cannot be overridden by user-supplied env vars
         if env_vars:
-            protected_keys = {"API_KEY", "CONTAINER_ID", "CONFIG_NAME", "ORCHESTRATOR_URL"}
+            protected_keys = {"API_KEY", "CONTAINER_ID", "CONFIG_NAME", "ORCHESTRATOR_URL", "AGENT_ID", "OPENCLAW_DISABLE_BONJOUR"}
             filtered_vars = {k: v for k, v in env_vars.items() if k not in protected_keys}
             env_dict = {e["name"]: e["value"] for e in environment}
             env_dict.update(filtered_vars)
@@ -167,6 +208,14 @@ def create_container(
                 container_id,
                 task_arn,
             )
+
+            if agent_id:
+                _update_agent_container(
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    container_id=container_id,
+                    api_key=api_key,
+                )
         else:
             logger.error(
                 "create_container ECS returned no tasks: container=%s response=%s",

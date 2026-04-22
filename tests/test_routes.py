@@ -86,10 +86,11 @@ def test_create_container_authorized(mock_get_auth_client, authenticated_client)
             ]
         }
 
-        response = authenticated_client.post(
-            "/containers",
-            json={"name": "test-container"},
-        )
+        with patch("app.services.ecs._update_agent_container"):
+            response = authenticated_client.post(
+                "/containers",
+                json={"name": "test-container", "agent_id": "agent-abc123"},
+            )
 
         assert response.status_code == 200
         data = response.json()

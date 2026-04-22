@@ -36,10 +36,12 @@ def test_container_request_model():
     req = ContainerRequest(
         name="test-container",
         config_name="default",
+        agent_id="agent-abc123",
     )
 
     assert req.name == "test-container"
     assert req.config_name == "default"
+    assert req.agent_id == "agent-abc123"
 
 
 def test_health_data_model():

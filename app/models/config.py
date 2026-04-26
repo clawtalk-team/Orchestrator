@@ -165,7 +165,6 @@ class SystemConfigUpdate(BaseModel):
         None,
         description="Voice Gateway URL"
     )
-
     model_config = ConfigDict(
         json_schema_extra={
             "example": {

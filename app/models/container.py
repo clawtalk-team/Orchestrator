@@ -100,6 +100,7 @@ class ContainerRequest(BaseModel):
                 "name": "my-agent-container",
                 "config_name": "default",
                 "agent_id": "agent-abc123",
+                "backend": "k8s",
                 "env_vars": {"DEBUG": "true"},
             }
         }

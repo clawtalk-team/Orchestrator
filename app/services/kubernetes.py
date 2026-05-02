@@ -28,14 +28,12 @@ _k8s_core_v1: Optional[k8s_client.CoreV1Api] = None
 def _load_kubeconfig_from_ssm(ssm_path: str, context: Optional[str]) -> bool:
     """Fetch kubeconfig YAML from SSM and load it. Returns True on success."""
     try:
+        import os
+
         import boto3
         import yaml
-        from botocore.exceptions import ClientError
 
-        region = (
-            __import__("os").environ.get("AWS_REGION")
-            or __import__("os").environ.get("DYNAMODB_REGION", "us-east-1")
-        )
+        region = os.environ.get("AWS_REGION") or os.environ.get("DYNAMODB_REGION", "us-east-1")
         ssm = boto3.client("ssm", region_name=region)
         response = ssm.get_parameter(Name=ssm_path, WithDecryption=True)
         kubeconfig_yaml = response["Parameter"]["Value"]

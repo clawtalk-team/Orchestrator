@@ -148,6 +148,7 @@ def create_container(
                 k8s_client.V1Container(
                     name="openclaw-agent",
                     image=settings.k8s_image,
+                    image_pull_policy=settings.k8s_image_pull_policy,
                     ports=[k8s_client.V1ContainerPort(container_port=8080)],
                     env=k8s_env,
                 )

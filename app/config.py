@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     # Kubernetes
     k8s_namespace: str = "openclaw"
     k8s_image: str = "openclaw-agent:latest"
+    k8s_image_pull_policy: str = "IfNotPresent"  # Never | IfNotPresent | Always
     k8s_kubeconfig: Optional[str] = None  # Path to kubeconfig; None = default/in-cluster
     k8s_context: Optional[str] = None  # Kubernetes context to use; None = current context
     default_backend: str = "ecs"  # Compute backend: "ecs" or "k8s"

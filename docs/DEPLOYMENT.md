@@ -205,6 +205,138 @@ Currently, the orchestrator doesn't have EventBridge integration (Phase 2). Stat
 - On container creation (PENDING)
 - Manual status checks would need to query ECS
 
+## Tailscale Setup
+
+The orchestrator Lambda can connect outbound to a [Tailscale](https://tailscale.com) tailnet at cold-start. This is optional — if no environment variable is set, the Lambda starts without it.
+
+### How key rotation works (no manual rotation needed)
+
+The Lambda does **not** store a long-lived auth key. On every cold-start, `scripts/lambda-entrypoint.sh` reads a personal API key from SSM and calls the Tailscale API to mint a fresh single-use ephemeral auth key (5-minute TTL). This means:
+
+- Auth keys never need rotation — they're generated on demand and discarded after use.
+- The **personal API key** in SSM needs updating every 90 days (Tailscale's max expiry). This is a single `aws ssm put-parameter` call; no Terraform change or deployment is required.
+
+### New environment checklist
+
+> **Important:** Tailscale will not work in a new environment until all of these steps are completed. The Lambda starts without Tailscale if the SSM parameter is missing or invalid.
+
+1. **Declare the tag** in your tailnet ACL (one-time per tailnet — skip if `tag:voxhelm` already exists):
+   - Tailscale Admin Console → **Access Controls** → add to `tagOwners` (see below)
+2. **Generate a personal API key** (Settings → Keys, set max 90-day expiry)
+3. **Store it in SSM:**
+   ```bash
+   aws --profile personal ssm put-parameter \
+     --region ap-southeast-2 \
+     --name "/clawtalk/orchestrator/<env>/tailscale/api-key" \
+     --type SecureString \
+     --value "tskey-api-..." \
+     --overwrite
+   ```
+4. **Apply Terraform** in `../infrastructure/infra/environments/<env>` — this creates the SSM slot (with a placeholder) and wires IAM + the env var to the Lambda
+5. **Verify** — invoke the Lambda and check CloudWatch Logs (see Verify section below)
+
+### Step 1 — Declare the tag in your ACL (one-time per tailnet)
+
+In the [Tailscale Admin Console](https://login.tailscale.com/admin/acls) → **Access Controls**, add the tag and its owner to `tagOwners`. Tailscale requires the tag to exist before auth keys referencing it can be created.
+
+```jsonc
+{
+  "tagOwners": {
+    // existing tags...
+    "tag:voxhelm": ["autogroup:admin"]
+  },
+  "acls": [
+    // existing rules...
+    {
+      // Allow Lambda nodes to initiate connections to any tailnet host.
+      // Tighten the dst list once you know the exact services to reach.
+      "action": "accept",
+      "src":    ["tag:voxhelm"],
+      "dst":    ["*:*"]
+    }
+  ]
+}
+```
+
+### Step 2 — Generate a personal API key
+
+In the [Tailscale Admin Console](https://login.tailscale.com/admin/settings/keys) → **Settings → Keys**, generate a **personal API key** with the maximum 90-day expiry. This key is stored in SSM and used by the Lambda to mint ephemeral auth keys at runtime.
+
+> **Note:** Do not use an OAuth client for this — OAuth clients do not have the `auth_keys` scope needed to generate auth keys via the API.
+
+### Step 3 — Store the key in SSM
+
+```bash
+aws --profile personal ssm put-parameter \
+  --region ap-southeast-2 \
+  --name "/clawtalk/orchestrator/dev/tailscale/api-key" \
+  --type SecureString \
+  --value "tskey-api-..." \
+  --overwrite
+```
+
+This step is **manual and not managed by Terraform** — Terraform creates the SSM slot with a placeholder but never overwrites a value that has already been set (`lifecycle { ignore_changes = [value] }`).
+
+### Step 4 — Apply Terraform
+
+`infrastructure/tailscale.tf` in the orchestrator repo is included from the root Terraform in `../infrastructure`. Run `terraform apply` from there:
+
+```bash
+cd ../infrastructure/infra/environments/dev
+terraform init
+terraform apply -var="orchestrator_image_tag=dev-latest"
+```
+
+This creates or confirms:
+- The SSM parameter slot `/clawtalk/orchestrator/dev/tailscale/api-key`
+- An IAM policy granting the Lambda `ssm:GetParameter` on that path
+- The `TAILSCALE_API_KEY_SSM_PATH` environment variable on the Lambda function
+
+After `apply`, Terraform outputs:
+
+| Output | Description |
+|---|---|
+| `tailscale_api_key_ssm_path` | SSM path — the Lambda reads this parameter to generate auth keys |
+| `lambda_tailscale_policy_arn` | IAM policy ARN — already attached to the Lambda execution role by the orchestrator module |
+
+### Rotating the personal API key (every 90 days)
+
+When your personal API key approaches expiry, generate a new one in the Tailscale Admin Console and update SSM:
+
+```bash
+aws --profile personal ssm put-parameter \
+  --region ap-southeast-2 \
+  --name "/clawtalk/orchestrator/dev/tailscale/api-key" \
+  --type SecureString \
+  --value "tskey-api-<new-key>" \
+  --overwrite
+```
+
+No Terraform apply or Lambda redeployment required. The next cold-start picks up the new key automatically.
+
+### Verify Tailscale connectivity
+
+After deploying, invoke the Lambda and check CloudWatch Logs for the Tailscale startup messages:
+
+```bash
+aws --profile personal logs tail /aws/lambda/orchestrator-dev \
+  --region ap-southeast-2 \
+  --since 5m \
+  --filter-pattern "[tailscale]"
+```
+
+Expected output on a successful cold-start:
+```
+[tailscale] generating ephemeral auth key via Tailscale API
+[tailscale] starting tailscaled (userspace networking)
+[tailscale] connecting as orchestrator-lambda-orchestrator-dev
+[tailscale] connected to tailnet
+```
+
+The node will appear in your Tailscale Admin Console device list tagged as `tag:voxhelm`. It disappears automatically when the Lambda execution environment is recycled.
+
+---
+
 ## Clean Up
 
 ```bash

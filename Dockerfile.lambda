@@ -1,7 +1,7 @@
 # ── Stage 1: fetch Tailscale static binaries ──────────────────────────────────
 # Alpine has wget + tar; the Lambda base image does not.
 FROM alpine:3.19 AS tailscale
-ARG TAILSCALE_VERSION=1.72.0
+ARG TAILSCALE_VERSION=1.96.4
 RUN wget -qO /tmp/tailscale.tgz \
       "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_arm64.tgz" \
     && tar -xz -C /tmp -f /tmp/tailscale.tgz \

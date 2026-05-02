@@ -414,17 +414,18 @@ Tailscale runs in **userspace-networking** mode (`--tun=userspace-networking`) s
 ### How it works
 
 1. On container start, `scripts/lambda-entrypoint.sh` runs before the Lambda runtime.
-2. It fetches a Tailscale auth key from SSM Parameter Store.
-3. It starts `tailscaled` in the background and calls `tailscale up`.
-4. The Lambda runtime then starts; every outbound call it makes can reach Tailscale nodes.
+2. It reads a Tailscale personal API key from SSM Parameter Store.
+3. It calls the Tailscale API to mint a fresh single-use ephemeral auth key (5-minute TTL).
+4. It starts `tailscaled` in the background and calls `tailscale up` with the ephemeral key.
+5. The Lambda runtime then starts; every outbound call it makes can reach Tailscale nodes.
 
-Lambda execution environments are recycled automatically — because the auth key is `ephemeral=true`, the Tailscale node is cleaned up from the device list when the environment is torn down.
+Lambda execution environments are recycled automatically — because the auth key is `ephemeral=true`, the Tailscale node is cleaned up from the device list when the environment is torn down. Auth keys are never reused and never need rotation.
 
 ### Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `TAILSCALE_AUTH_KEY_SSM_PATH` | Yes (prod) | SSM SecureString path — output by `infrastructure/tailscale.tf` |
+| `TAILSCALE_API_KEY_SSM_PATH` | Yes (prod) | SSM SecureString path holding a Tailscale personal API key — used to generate fresh ephemeral auth keys on each cold-start |
 | `TAILSCALE_AUTH_KEY` | Dev only | Literal auth key; overrides SSM lookup |
 
 If neither variable is set the Lambda starts normally without connecting to Tailscale.

@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # SSM Parameter Store
     ssm_prefix: str = "/clawtalk/orchestrator"
 
+    # Kubernetes
+    k8s_namespace: str = "openclaw"
+    k8s_image: str = "openclaw-agent:latest"
+    k8s_kubeconfig: Optional[str] = None  # Path to kubeconfig; None = default/in-cluster
+    k8s_context: Optional[str] = None  # Kubernetes context to use; None = current context
+    default_backend: str = "ecs"  # Compute backend: "ecs" or "k8s"
+
 
 @lru_cache
 def get_settings() -> Settings:

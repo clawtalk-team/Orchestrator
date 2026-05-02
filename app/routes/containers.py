@@ -3,9 +3,10 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.config import get_settings
 from app.models.container import (ContainerHealthResponse, ContainerRequest,
                                   ContainerResponse)
-from app.services import dynamodb, ecs
+from app.services import dynamodb, ecs, kubernetes as k8s
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/containers", tags=["containers"])
@@ -32,23 +33,37 @@ async def create_container(request: Request, req: ContainerRequest):
     Optional environment variables can be passed in the request body to customize container
     behavior (e.g. DEBUG=true for verbose logging).
     """
+    settings = get_settings()
     user_id = request.state.user_id
     api_key = request.state.api_key
     config_name = req.config_name or "default"
+    backend = req.backend or settings.default_backend
 
-    logger.info("create_container: user=%s config=%s agent_id=%s", user_id, config_name, req.agent_id)
-    container = ecs.create_container(
-        user_id=user_id,
-        api_key=api_key,
-        config_name=config_name,
-        agent_id=req.agent_id,
-        env_vars=req.env_vars,
-    )
+    logger.info("create_container: user=%s config=%s agent_id=%s backend=%s", user_id, config_name, req.agent_id, backend)
+
+    if backend == "k8s":
+        container = k8s.create_container(
+            user_id=user_id,
+            api_key=api_key,
+            config_name=config_name,
+            agent_id=req.agent_id,
+            env_vars=req.env_vars,
+        )
+    else:
+        container = ecs.create_container(
+            user_id=user_id,
+            api_key=api_key,
+            config_name=config_name,
+            agent_id=req.agent_id,
+            env_vars=req.env_vars,
+        )
+
     logger.info(
-        "create_container done: user=%s container=%s status=%s",
+        "create_container done: user=%s container=%s status=%s backend=%s",
         user_id,
         container.container_id,
         container.status,
+        container.backend,
     )
     return container.to_response()
 
@@ -101,6 +116,10 @@ async def get_container(request: Request, container_id: str):
         logger.warning("get_container: not found user=%s container=%s", user_id, container_id)
         raise HTTPException(status_code=404, detail="Container not found")
 
+    # For k8s containers, sync live pod status on every GET
+    if container.backend == "k8s" and container.status in ("PENDING", "RUNNING"):
+        container = k8s.sync_pod_status(user_id=user_id, container_id=container_id) or container
+
     return container.to_response()
 
 
@@ -127,8 +146,11 @@ async def delete_container(request: Request, container_id: str):
         logger.warning("delete_container: not found user=%s container=%s", user_id, container_id)
         raise HTTPException(status_code=404, detail="Container not found")
 
-    logger.info("delete_container: user=%s container=%s", user_id, container_id)
-    ecs.stop_container(user_id=user_id, container_id=container_id)
+    logger.info("delete_container: user=%s container=%s backend=%s", user_id, container_id, container.backend)
+    if container.backend == "k8s":
+        k8s.stop_container(user_id=user_id, container_id=container_id)
+    else:
+        ecs.stop_container(user_id=user_id, container_id=container_id)
 
 
 @router.get(

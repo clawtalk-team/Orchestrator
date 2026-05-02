@@ -80,9 +80,11 @@ class Settings(BaseSettings):
     k8s_namespace: str = "openclaw"
     k8s_image: str = "openclaw-agent:latest"
     k8s_image_pull_policy: str = "IfNotPresent"  # Never | IfNotPresent | Always
+    k8s_image_pull_secret: Optional[str] = None  # imagePullSecret name for private registries (e.g. ecr-secret)
     k8s_kubeconfig: Optional[str] = None  # Path to kubeconfig; None = default/in-cluster
+    k8s_kubeconfig_ssm_path: Optional[str] = None  # SSM path storing kubeconfig YAML (takes precedence over k8s_kubeconfig)
     k8s_context: Optional[str] = None  # Kubernetes context to use; None = current context
-    default_backend: str = "ecs"  # Compute backend: "ecs" or "k8s"
+    default_backend: str = "k8s"  # Compute backend: "ecs" or "k8s"
 
 
 @lru_cache

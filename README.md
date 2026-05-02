@@ -1,6 +1,6 @@
 # Orchestrator Service
 
-Container orchestrator for managing openclaw-agent instances. Provides API for dynamic provisioning, lifecycle management, and health monitoring of containerized agents running on AWS ECS Fargate.
+Container orchestrator for managing openclaw-agent instances. Provides API for dynamic provisioning, lifecycle management, and health monitoring of containerized agents running on AWS ECS Fargate or Kubernetes.
 
 ## Overview
 
@@ -163,30 +163,45 @@ Hardcoded Defaults (fallback)
 When a container is created, the orchestrator:
 1. Saves the user's auth key into their user config in DynamoDB
 2. Creates a DynamoDB record for the container in `PENDING` status
-3. Launches an ECS Fargate task with a small set of bootstrap environment variables (see below)
+3. Launches a container (ECS task or Kubernetes Pod) with a small set of bootstrap environment variables (see below)
 
-> **Note:** `ip_address` is not required at this stage. The field is populated asynchronously via an EventBridge task-state event when the ECS task reaches `RUNNING`, but its absence does not affect container functionality — the container communicates outbound via the orchestrator URL injected at launch time.
+> **Note:** `ip_address` is not required at this stage. On ECS it is populated asynchronously via an EventBridge task-state event when the task reaches `RUNNING`; on Kubernetes it is synced on the next `GET /containers/{id}` call. Its absence does not affect container functionality — the container communicates outbound via the orchestrator URL injected at launch time.
 
-At startup, the container's entrypoint (`fetch_config.py`) reads config directly from DynamoDB, builds `~/.openclaw/openclaw.json` and `~/.clawtalk/clawtalk.json`, then starts `openclaw-agent`.
+At startup, the container's `openclaw-agent --init` fetches config from the orchestrator API, builds `~/.openclaw/openclaw.json` and `~/.clawtalk/clawtalk.json`, then starts `openclaw-agent`.
 
 This ensures:
 - Admins can update infrastructure URLs globally without recreating containers
 - Users maintain their own API keys and preferences
 - The config files on disk always reflect the state of DynamoDB at container start time
 
-### ECS Container Environment Variables
+### Compute Backends
 
-These five variables are injected into the ECS task at creation time (`app/services/ecs.py`):
+The orchestrator supports two compute backends, selectable per-request or via server default:
+
+| Backend | Description |
+|---------|-------------|
+| `ecs` | AWS ECS Fargate — serverless tasks, managed by AWS |
+| `k8s` | Kubernetes — pods on a self-managed or cloud-managed cluster |
+
+The **server default** is controlled by the `DEFAULT_BACKEND` environment variable (e.g. `DEFAULT_BACKEND=k8s`). Individual container creation requests can override it by including `"backend": "k8s"` or `"backend": "ecs"` in the request body. Once created, a container's backend is stored in DynamoDB and all subsequent operations (status, delete) route to the correct backend automatically.
+
+### Container Environment Variables
+
+These variables are injected at creation time (same set for both ECS and Kubernetes):
 
 | Variable | Value | Description |
 |---|---|---|
 | `API_KEY` | From `Authorization` header | User's auth-gateway API key |
-| `CONTAINER_ID` | Generated UUID | Identifies this container |
-| `CONFIG_NAME` | Request param (default: `default`) | Which named config to load from DynamoDB |
+| `CONTAINER_ID` | Generated ID | Identifies this container |
+| `CONFIG_NAME` | Request param (default: `default`) | Which named config to load |
 | `ORCHESTRATOR_URL` | `settings.orchestrator_url` | URL of this orchestrator service |
+| `AGENT_ID` | Request param (if supplied) | Agent ID to register at startup |
 | `OPENCLAW_DISABLE_BONJOUR` | `1` | Disables mDNS/Bonjour discovery |
+| `OPENROUTER_API_KEY` | From user config (if set) | OpenRouter API key |
+| `ANTHROPIC_API_KEY` | From user config (if set) | Anthropic API key |
+| `OPENAI_API_KEY` | From user config (if set) | OpenAI API key |
 
-Callers can also supply additional `env_vars` when creating a container, but the four keys `API_KEY`, `CONTAINER_ID`, `CONFIG_NAME`, and `ORCHESTRATOR_URL` are **protected** and cannot be overridden by user-supplied values.
+The keys `API_KEY`, `CONTAINER_ID`, `CONFIG_NAME`, `ORCHESTRATOR_URL`, `AGENT_ID`, and `OPENCLAW_DISABLE_BONJOUR` are **protected** and cannot be overridden by caller-supplied `env_vars`.
 
 ### System Configuration (Admin-managed)
 
@@ -441,7 +456,8 @@ Built with:
 - **AWS Lambda** - Serverless compute (ARM64)
 - **API Gateway HTTP API** - HTTP endpoint
 - **DynamoDB** - Container metadata and configuration storage
-- **ECS Fargate** - Container runtime
+- **ECS Fargate** - Container runtime (default for production)
+- **Kubernetes** - Alternative container runtime (configurable via `DEFAULT_BACKEND=k8s`)
 - **CloudWatch Logs** - Logging
 - **Tailscale** - Outbound private network connectivity (userspace, optional)
 
@@ -456,6 +472,43 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 - **[E2E Testing](./docs/E2E_TEST_GUIDE.md)** - Run end-to-end tests
 - **[Implementation Summary](./docs/IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
 - **[Container Requirements](./docs/CONTAINER_REQUIREMENTS.md)** - Container configuration requirements
+
+## Kubernetes Configuration
+
+When `DEFAULT_BACKEND=k8s` (or a request specifies `"backend": "k8s"`), the orchestrator creates Kubernetes Pods instead of ECS tasks. The following environment variables configure the k8s backend:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_BACKEND` | `k8s` | Compute backend to use when not specified per-request (`ecs` or `k8s`) |
+| `K8S_NAMESPACE` | `openclaw` | Kubernetes namespace where pods are created |
+| `K8S_IMAGE` | `openclaw-agent:latest` | Container image for agent pods |
+| `K8S_IMAGE_PULL_POLICY` | `IfNotPresent` | Image pull policy (`Never`, `IfNotPresent`, `Always`) |
+| `K8S_IMAGE_PULL_SECRET` | _(none)_ | Name of an `imagePullSecret` for private registries (e.g. `ecr-secret`) |
+| `K8S_KUBECONFIG` | _(none)_ | Path to a kubeconfig file. Omit to use in-cluster config or `~/.kube/config` |
+| `K8S_KUBECONFIG_SSM_PATH` | _(none)_ | SSM Parameter Store path containing a kubeconfig YAML (takes precedence over `K8S_KUBECONFIG`) |
+| `K8S_CONTEXT` | _(current)_ | Kubernetes context to use. Omit to use the current context |
+
+### Kubeconfig Loading Order
+
+1. `K8S_KUBECONFIG_SSM_PATH` — fetch YAML from SSM (SecureString), used when the orchestrator runs in AWS without local file access
+2. `K8S_KUBECONFIG` — load from a local file path
+3. In-cluster config — used automatically when the orchestrator itself runs inside a Kubernetes pod
+4. `~/.kube/config` default — fallback for local development
+
+### Example: Local Development Against a Remote Cluster
+
+```bash
+K8S_KUBECONFIG=/path/to/kubeconfig.yaml \
+K8S_CONTEXT=my-context \
+K8S_IMAGE=826182175287.dkr.ecr.ap-southeast-2.amazonaws.com/openclaw-agent-dev:latest \
+K8S_IMAGE_PULL_SECRET=ecr-secret \
+K8S_IMAGE_PULL_POLICY=Always \
+DEFAULT_BACKEND=k8s \
+ORCHESTRATOR_URL=http://<your-tailscale-or-public-ip>:8080 \
+uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+> **Note:** `ORCHESTRATOR_URL` must be reachable from inside the k8s pods. Use a Tailscale IP, a LoadBalancer address, or an ingress — not `localhost`.
 
 ## Development
 
@@ -491,7 +544,7 @@ orchestrator/
 │   ├── middleware/          # Authentication middleware
 │   ├── models/              # Pydantic models
 │   ├── routes/              # API endpoint handlers
-│   └── services/            # Business logic (DynamoDB, ECS)
+│   └── services/            # Business logic (DynamoDB, ECS, Kubernetes)
 ├── tests/                   # Unit and integration tests
 ├── lambda_handler.py        # AWS Lambda entry point
 ├── Dockerfile.lambda        # Lambda container image

@@ -114,11 +114,9 @@ def test_create_container_protected_env_vars(aws_mocks):
     pod_body = mock_api.create_namespaced_pod.call_args[1]["body"]
     env_vars = pod_body.spec.containers[0].env
     plain_map = {e.name: e.value for e in env_vars}
-    secret_ref_names = {e.name for e in env_vars if e.value_from is not None}
 
-    # API_KEY must come from the Secret, not as a plain value
-    assert "API_KEY" in secret_ref_names, "API_KEY must be injected via secretKeyRef"
-    assert plain_map.get("API_KEY") is None  # no plain-text leak
+    # API_KEY is a plain env var (matching ECS behaviour); user cannot override it
+    assert plain_map.get("API_KEY") == "real-token"
     assert plain_map["CUSTOM_VAR"] == "allowed"  # custom var passed through
 
 
@@ -360,35 +358,33 @@ def test_post_containers_k8s_backend(aws_mocks):
     mock_api.create_namespaced_pod.assert_called_once()
 
 
-def test_post_containers_ecs_backend_default(aws_mocks):
-    """POST /containers without backend uses ECS (server default)."""
+@_mock_auth()
+def test_post_containers_k8s_backend_default(aws_mocks):
+    """POST /containers without backend uses k8s (server default)."""
     from app.main import app
     from fastapi.testclient import TestClient
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"user_id": "test-user"}
-    mock_client = MagicMock()
-    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_result = MagicMock()
+    mock_result.metadata.name = "oc-default-k8s"
 
-    with patch("app.middleware.auth.get_auth_client", return_value=mock_client), \
-         patch("app.services.ecs._get_ecs_client") as mock_ecs, \
-         patch("app.services.ecs._update_agent_container"):
-        mock_ecs.return_value.run_task.return_value = {
-            "tasks": [{"taskArn": "arn:aws:ecs:us-east-1:123:task/test-ecs"}],
-            "failures": [],
-        }
+    with patch("app.services.kubernetes._get_k8s_client") as mock_get, \
+         patch("app.services.kubernetes._update_agent_container"):
+        mock_api = MagicMock()
+        mock_api.create_namespaced_pod.return_value = mock_result
+        mock_get.return_value = mock_api
+
         client = TestClient(app)
         client.headers.update({"Authorization": "Bearer test-user:test-token-value"})
 
         response = client.post(
             "/containers",
-            json={"agent_id": "agent-ecs-test"},
+            json={"agent_id": "agent-k8s-default"},
         )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["backend"] == "ecs"
+    assert data["backend"] == "k8s"
+    mock_api.create_namespaced_pod.assert_called_once()
 
 
 @_mock_auth()

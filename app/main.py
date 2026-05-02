@@ -47,11 +47,12 @@ app = FastAPI(
     description="""
 ## Container Orchestrator for OpenClaw Agents
 
-This API manages containerized agent deployments on AWS ECS, providing:
+This API manages containerized agent deployments on AWS ECS or Kubernetes, providing:
 
 * **Container Management**: Create, list, monitor, and delete agent containers
 * **Health Monitoring**: Track container health and performance metrics
 * **User Isolation**: Each user gets their own isolated container environment
+* **Multi-backend**: Supports AWS ECS Fargate and Kubernetes (k8s) compute backends
 
 ### Authentication
 
@@ -59,10 +60,17 @@ All endpoints (except `/health`) require API key authentication via the `Authori
 
 ### Container Lifecycle
 
-1. **Create** - Request a new container via `POST /containers`
+1. **Create** - Request a new container via `POST /containers` (optionally specify `backend`)
 2. **Monitor** - Check status and health via `GET /containers/{container_id}`
 3. **Use** - Connect to your running container via its IP address
 4. **Delete** - Stop and remove via `DELETE /containers/{container_id}`
+
+### Compute Backends
+
+Containers can run on either **ECS Fargate** or **Kubernetes**. The active backend is controlled
+by the `DEFAULT_BACKEND` environment variable on the orchestrator (`ecs` or `k8s`). Individual
+requests can override the default by including `"backend": "k8s"` or `"backend": "ecs"` in the
+`POST /containers` body.
     """,
     version="0.1.0",
     docs_url="/docs",

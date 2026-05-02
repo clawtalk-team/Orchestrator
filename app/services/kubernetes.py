@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 _k8s_core_v1: Optional[k8s_client.CoreV1Api] = None
 
 
+def _load_kubeconfig_from_ssm(ssm_path: str, context: Optional[str]) -> bool:
+    """Fetch kubeconfig YAML from SSM and load it. Returns True on success."""
+    try:
+        import os
+
+        import boto3
+        import yaml
+
+        region = os.environ.get("AWS_REGION") or os.environ.get("DYNAMODB_REGION", "us-east-1")
+        ssm = boto3.client("ssm", region_name=region)
+        response = ssm.get_parameter(Name=ssm_path, WithDecryption=True)
+        kubeconfig_yaml = response["Parameter"]["Value"]
+        config_dict = yaml.safe_load(kubeconfig_yaml)
+        k8s_config.load_kube_config(config_dict=config_dict, context=context)
+        logger.info("k8s kubeconfig loaded from SSM: %s", ssm_path)
+        return True
+    except Exception as exc:
+        logger.warning("k8s kubeconfig SSM load failed (%s): %s", ssm_path, exc)
+        return False
+
+
 def _get_k8s_client() -> k8s_client.CoreV1Api:
     """Return a cached CoreV1Api client, loading kubeconfig on first call."""
     global _k8s_core_v1
@@ -33,7 +54,9 @@ def _get_k8s_client() -> k8s_client.CoreV1Api:
 
     settings = get_settings()
     try:
-        if settings.k8s_kubeconfig:
+        if settings.k8s_kubeconfig_ssm_path:
+            _load_kubeconfig_from_ssm(settings.k8s_kubeconfig_ssm_path, settings.k8s_context)
+        elif settings.k8s_kubeconfig:
             k8s_config.load_kube_config(
                 config_file=settings.k8s_kubeconfig,
                 context=settings.k8s_context,
@@ -95,7 +118,8 @@ def create_container(
     logger.info("k8s create_container start: container=%s user=%s config=%s", container_id, user_id, config_name)
 
     # 1. Ensure user config exists with defaults and current API key
-    UserConfigService().ensure_container_defaults(user_id=user_id, config_name=config_name, api_key=api_key)
+    config_service = UserConfigService()
+    config_service.ensure_container_defaults(user_id=user_id, config_name=config_name, api_key=api_key)
 
     # 2. Create Container record in PENDING status
     container = Container(
@@ -112,28 +136,22 @@ def create_container(
     dynamodb.create_container(container)
     logger.info("k8s create_container db record created: container=%s", container_id)
 
-    # 3. Store the API key in a Kubernetes Secret so it is not visible as a
-    #    plain env var in `kubectl describe pod` or the k8s API.
+    # 3. Build environment variables — all plain env vars, matching ECS behaviour.
+    #    Also inject the user's LLM provider key so openclaw.json env-var references
+    #    (e.g. ${OPENROUTER_API_KEY}) resolve correctly inside the pod.
     namespace = settings.k8s_namespace
-    secret_name = f"{container_id}-secrets"
     api = _get_k8s_client()
-    secret = k8s_client.V1Secret(
-        metadata=k8s_client.V1ObjectMeta(name=secret_name, namespace=namespace),
-        string_data={"API_KEY": api_key},
-    )
-    try:
-        api.create_namespaced_secret(namespace=namespace, body=secret)
-        logger.info("k8s secret created: container=%s secret=%s", container_id, secret_name)
-    except ApiException as exc:
-        logger.exception("k8s secret creation failed: container=%s error=%s", container_id, exc)
-        container.status = "FAILED"
-        container.updated_at = datetime.now(timezone.utc)
-        dynamodb.update_container(container)
-        raise
 
-    # 4. Build environment variables (API_KEY sourced from the Secret above)
+    user_config = config_service.get_user_config(user_id, config_name) or {}
+    llm_provider_env_keys = {
+        "openrouter": ("OPENROUTER_API_KEY", user_config.get("openrouter_api_key", "")),
+        "anthropic":  ("ANTHROPIC_API_KEY",  user_config.get("anthropic_api_key", "")),
+        "openai":     ("OPENAI_API_KEY",      user_config.get("openai_api_key", "")),
+    }
+
     protected_keys = {"API_KEY", "CONTAINER_ID", "CONFIG_NAME", "ORCHESTRATOR_URL", "AGENT_ID", "OPENCLAW_DISABLE_BONJOUR"}
     plain_env: Dict[str, str] = {
+        "API_KEY": api_key,
         "CONTAINER_ID": container_id,
         "CONFIG_NAME": config_name,
         "ORCHESTRATOR_URL": settings.orchestrator_url,
@@ -141,6 +159,13 @@ def create_container(
     }
     if agent_id:
         plain_env["AGENT_ID"] = agent_id
+
+    # Inject all known LLM provider keys so the pod works regardless of which
+    # provider the user has configured.
+    for env_name, value in llm_provider_env_keys.values():
+        if value:
+            plain_env[env_name] = value
+
     if env_vars:
         filtered = {k: v for k, v in env_vars.items() if k not in protected_keys}
         plain_env.update(filtered)
@@ -148,16 +173,6 @@ def create_container(
             logger.info("Added %d custom env vars to container %s", len(filtered), container_id)
 
     k8s_env = [k8s_client.V1EnvVar(name=k, value=v) for k, v in plain_env.items()]
-    # Inject API_KEY from the Secret rather than as a plain value
-    k8s_env.append(k8s_client.V1EnvVar(
-        name="API_KEY",
-        value_from=k8s_client.V1EnvVarSource(
-            secret_key_ref=k8s_client.V1SecretKeySelector(
-                name=secret_name,
-                key="API_KEY",
-            )
-        ),
-    ))
 
     # 5. Build Pod manifest
     pod = k8s_client.V1Pod(
@@ -181,6 +196,10 @@ def create_container(
                     env=k8s_env,
                 )
             ],
+            image_pull_secrets=(
+                [k8s_client.V1LocalObjectReference(name=settings.k8s_image_pull_secret)]
+                if settings.k8s_image_pull_secret else None
+            ),
         ),
     )
 
@@ -200,11 +219,6 @@ def create_container(
         container.status = "FAILED"
         container.updated_at = datetime.now(timezone.utc)
         dynamodb.update_container(container)
-        # Clean up the Secret so it doesn't linger on pod creation failure
-        try:
-            api.delete_namespaced_secret(name=secret_name, namespace=namespace)
-        except ApiException:
-            pass
         raise
 
     logger.info("k8s create_container complete: container=%s pod=%s", container_id, container.task_arn)
@@ -229,15 +243,6 @@ def stop_container(user_id: str, container_id: str) -> bool:
             logger.exception("k8s pod deletion failed: container=%s error=%s", container_id, exc)
             return False
         logger.info("k8s pod already gone: container=%s pod=%s", container_id, pod_name)
-
-    # Remove the associated Secret (best-effort; ignore 404)
-    secret_name = f"{container_id}-secrets"
-    try:
-        api.delete_namespaced_secret(name=secret_name, namespace=namespace)
-        logger.info("k8s secret deleted: container=%s secret=%s", container_id, secret_name)
-    except ApiException as exc:
-        if exc.status != 404:
-            logger.warning("k8s secret deletion failed: container=%s error=%s", container_id, exc)
 
     container.status = "STOPPED"
     container.updated_at = datetime.now(timezone.utc)

@@ -114,11 +114,9 @@ def test_create_container_protected_env_vars(aws_mocks):
     pod_body = mock_api.create_namespaced_pod.call_args[1]["body"]
     env_vars = pod_body.spec.containers[0].env
     plain_map = {e.name: e.value for e in env_vars}
-    secret_ref_names = {e.name for e in env_vars if e.value_from is not None}
 
-    # Sensitive keys come from the Secret, not as plain values
-    assert "API_KEY" in secret_ref_names, "API_KEY must be injected via secretKeyRef"
-    assert plain_map.get("API_KEY") is None
+    # API_KEY is a plain env var (matching ECS behaviour); user cannot override it
+    assert plain_map.get("API_KEY") == "real-token"
     assert plain_map["CUSTOM_VAR"] == "allowed"  # custom var passed through
 
 

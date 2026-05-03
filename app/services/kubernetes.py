@@ -101,16 +101,27 @@ def _get_k8s_client() -> k8s_client.CoreV1Api:
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         from urllib3.contrib.socks import SOCKSProxyManager
 
-        # Skip SSL verification for the SOCKS5 proxy connection to the k8s API.
-        # k3s uses a self-signed CA cert whose SANs typically don't include the
-        # Tailscale IP, so both chain validation and hostname checks would fail.
-        # The Tailscale/WireGuard overlay already provides encryption and
-        # mutual authentication for this traffic.
+        # Replace the default pool manager with one that routes through the
+        # Tailscale SOCKS5 proxy. We must carry forward the client cert/key
+        # (mTLS) from the kubeconfig so the k8s API accepts the connection.
+        # SSL chain verification is disabled because k3s uses a self-signed CA
+        # whose SANs typically don't include the Tailscale IP — the
+        # Tailscale/WireGuard overlay already provides encryption and mutual
+        # authentication.
+        proxy_kwargs: dict = {"cert_reqs": "CERT_NONE"}
+        if configuration.cert_file:
+            proxy_kwargs["cert_file"] = configuration.cert_file
+        if configuration.key_file:
+            proxy_kwargs["key_file"] = configuration.key_file
+
         api_client.rest_client.pool_manager = SOCKSProxyManager(
-            "socks5://localhost:1055",
-            cert_reqs="CERT_NONE",
+            "socks5://localhost:1055", **proxy_kwargs
         )
-        logger.info("k8s: using Tailscale SOCKS5 proxy at localhost:1055 (SSL verification disabled)")
+        logger.info(
+            "k8s: using Tailscale SOCKS5 proxy at localhost:1055 "
+            "(SSL verification disabled, client_cert=%s)",
+            bool(configuration.cert_file),
+        )
 
     _k8s_core_v1 = k8s_client.CoreV1Api(api_client=api_client)
     return _k8s_core_v1

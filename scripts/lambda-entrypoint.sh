@@ -140,14 +140,7 @@ tailscale \
     && echo "[tailscale] connected to tailnet ($(date -u +%H:%M:%S.%3NZ))" \
     || echo "[tailscale] WARNING: tailscale up failed ($(date -u +%H:%M:%S.%3NZ))" &
 
-# Route Tailscale-bound traffic through the local SOCKS5 proxy.
-# tailscaled in userspace-networking mode does NOT install kernel routes for
-# 100.64.0.0/10, so Python socket() calls to Tailscale IPs use the default
-# route (internet) and never reach the daemon. ALL_PROXY fixes this.
-# NO_PROXY keeps AWS service calls (DynamoDB, SSM, Lambda) on the direct path.
-export ALL_PROXY="socks5://localhost:1055"
-export NO_PROXY=".amazonaws.com,169.254.169.254,127.0.0.1,localhost"
-echo "[tailscale] SOCKS5 proxy configured, connecting in background"
+echo "[tailscale] SOCKS5 proxy configured at localhost:1055, connecting in background"
 
 # --------------------------------------------------------------------------- #
 # Hand off to Lambda runtime

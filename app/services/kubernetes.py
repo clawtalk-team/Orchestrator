@@ -88,15 +88,21 @@ def _get_k8s_client() -> k8s_client.CoreV1Api:
     configuration = k8s_client.Configuration.get_default_copy()
     configuration.retries = 1
 
+    api_client = k8s_client.ApiClient(configuration=configuration)
+
     # In Lambda, Tailscale runs with --tun=userspace-networking which does NOT
     # install kernel routes for 100.64.0.0/10. Python socket calls go through
-    # the kernel and never reach the Tailscale daemon. Route k8s traffic through
-    # the local SOCKS5 proxy that tailscaled exposes on port 1055.
+    # the kernel and never reach the Tailscale daemon. Route k8s API traffic
+    # through the local SOCKS5 proxy that tailscaled exposes on port 1055.
+    #
+    # urllib3's ProxyManager only supports http/https schemes, so we must use
+    # SOCKSProxyManager (from urllib3.contrib.socks, requires pysocks) and
+    # patch it directly onto the REST client's pool_manager.
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
-        configuration.proxy = "socks5h://localhost:1055"
+        from urllib3.contrib.socks import SOCKSProxyManager
+        api_client.rest_client.pool_manager = SOCKSProxyManager("socks5://localhost:1055")
         logger.info("k8s: using Tailscale SOCKS5 proxy at localhost:1055")
 
-    api_client = k8s_client.ApiClient(configuration=configuration)
     _k8s_core_v1 = k8s_client.CoreV1Api(api_client=api_client)
     return _k8s_core_v1
 

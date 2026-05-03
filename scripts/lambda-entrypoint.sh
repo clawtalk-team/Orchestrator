@@ -23,7 +23,7 @@ TS_LOG="${TS_DIR}/tailscaled.log"
 # --------------------------------------------------------------------------- #
 
 if [ -z "${TAILSCALE_AUTH_KEY:-}" ] && [ -n "${TAILSCALE_API_KEY_SSM_PATH:-}" ]; then
-    echo "[tailscale] generating ephemeral auth key via Tailscale API"
+    echo "[tailscale] generating ephemeral auth key via Tailscale API ($(date -u +%H:%M:%S.%3NZ))"
     TAILSCALE_AUTH_KEY=$(python3 - <<'PYEOF'
 import urllib.request, urllib.parse, json, os, sys, boto3
 
@@ -94,9 +94,10 @@ fi
 
 mkdir -p "${TS_DIR}"
 
-echo "[tailscale] starting tailscaled (userspace networking)"
+echo "[tailscale] starting tailscaled (userspace networking) ($(date -u +%H:%M:%S.%3NZ))"
 tailscaled \
     --tun=userspace-networking \
+    --socks5-server=localhost:1055 \
     --state="${TS_DIR}/tailscaled.state" \
     --socket="${TS_SOCK}" \
     >> "${TS_LOG}" 2>&1 &
@@ -122,7 +123,7 @@ fi
 # Sanitize: underscores are not valid in DNS labels; truncate to 63 chars
 HOSTNAME="orchestrator-lambda-${AWS_LAMBDA_FUNCTION_NAME:-unknown}"
 HOSTNAME=$(echo "$HOSTNAME" | tr '_' '-' | cut -c 1-63)
-echo "[tailscale] connecting as ${HOSTNAME}"
+echo "[tailscale] connecting as ${HOSTNAME} ($(date -u +%H:%M:%S.%3NZ))"
 
 tailscale \
     --socket="${TS_SOCK}" \
@@ -132,8 +133,17 @@ tailscale \
     --accept-routes \
     --accept-dns=false \
     --timeout=10s \
-    && echo "[tailscale] connected to tailnet" \
-    || echo "[tailscale] WARNING: tailscale up failed — Lambda will start without Tailscale"
+    && echo "[tailscale] connected to tailnet ($(date -u +%H:%M:%S.%3NZ))" \
+    || echo "[tailscale] WARNING: tailscale up failed — Lambda will start without Tailscale ($(date -u +%H:%M:%S.%3NZ))"
+
+# Route Tailscale-bound traffic through the local SOCKS5 proxy.
+# tailscaled in userspace-networking mode does NOT install kernel routes for
+# 100.64.0.0/10, so Python socket() calls to Tailscale IPs use the default
+# route (internet) and never reach the daemon. ALL_PROXY fixes this.
+# NO_PROXY keeps AWS service calls (DynamoDB, SSM, Lambda) on the direct path.
+export ALL_PROXY="socks5://localhost:1055"
+export NO_PROXY=".amazonaws.com,169.254.169.254,127.0.0.1,localhost"
+echo "[tailscale] SOCKS5 proxy active (ALL_PROXY=socks5://localhost:1055)"
 
 # --------------------------------------------------------------------------- #
 # Hand off to Lambda runtime

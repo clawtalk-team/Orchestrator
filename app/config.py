@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # Defaults to localhost only for local development.
     auth_gateway_url: str = "http://localhost:8001"
     auth_gateway_timeout: float = 5.0  # seconds
+
+    @field_validator("auth_gateway_url", "orchestrator_url", mode="before")
+    @classmethod
+    def strip_trailing_slash(cls, v: str) -> str:
+        return v.rstrip("/") if isinstance(v, str) else v
 
     # OpenClaw / Voice Gateway
     openclaw_url: str = "http://localhost:18789"

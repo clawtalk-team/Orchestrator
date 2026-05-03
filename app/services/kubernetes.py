@@ -38,7 +38,7 @@ def _load_kubeconfig_from_ssm(ssm_path: str, context: Optional[str]) -> bool:
         response = ssm.get_parameter(Name=ssm_path, WithDecryption=True)
         kubeconfig_yaml = response["Parameter"]["Value"]
         config_dict = yaml.safe_load(kubeconfig_yaml)
-        k8s_config.load_kube_config(config_dict=config_dict, context=context)
+        k8s_config.load_kube_config_from_dict(config_dict, context=context)
         logger.info("k8s kubeconfig loaded from SSM: %s", ssm_path)
         return True
     except Exception as exc:
@@ -145,11 +145,13 @@ def create_container(
     user_config = config_service.get_user_config(user_id, config_name) or {}
     llm_provider_env_keys = {
         "openrouter": ("OPENROUTER_API_KEY", user_config.get("openrouter_api_key", "")),
-        "anthropic":  ("ANTHROPIC_API_KEY",  user_config.get("anthropic_api_key", "")),
-        "openai":     ("OPENAI_API_KEY",      user_config.get("openai_api_key", "")),
+        "anthropic": ("ANTHROPIC_API_KEY", user_config.get("anthropic_api_key", "")),
+        "openai": ("OPENAI_API_KEY", user_config.get("openai_api_key", "")),
     }
 
-    protected_keys = {"API_KEY", "CONTAINER_ID", "CONFIG_NAME", "ORCHESTRATOR_URL", "AGENT_ID", "OPENCLAW_DISABLE_BONJOUR"}
+    protected_keys = {
+        "API_KEY", "CONTAINER_ID", "CONFIG_NAME", "ORCHESTRATOR_URL", "AGENT_ID", "OPENCLAW_DISABLE_BONJOUR"
+    }
     plain_env: Dict[str, str] = {
         "API_KEY": api_key,
         "CONTAINER_ID": container_id,
@@ -214,7 +216,7 @@ def create_container(
 
         if agent_id:
             _update_agent_container(user_id=user_id, agent_id=agent_id, container_id=container_id, api_key=api_key)
-    except ApiException as exc:
+    except Exception as exc:
         logger.exception("k8s pod creation failed: container=%s error=%s", container_id, exc)
         container.status = "FAILED"
         container.updated_at = datetime.now(timezone.utc)

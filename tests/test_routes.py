@@ -66,36 +66,16 @@ def test_create_container_authorized(mock_get_auth_client, authenticated_client)
     mock_client.get = AsyncMock(return_value=mock_response)
     mock_get_auth_client.return_value = mock_client
 
-    with patch("app.services.ecs._get_ecs_client") as mock_ecs:
-        mock_ecs.return_value.run_task.return_value = {
-            "tasks": [
-                {
-                    "taskArn": "arn:aws:ecs:us-east-1:123456789:task/test",
-                    "attachments": [
-                        {
-                            "type": "ElasticNetworkInterface",
-                            "details": [
-                                {
-                                    "name": "privateIPv4Address",
-                                    "value": "10.0.1.45",
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ]
-        }
+    with patch("app.services.kubernetes._dispatch_provision"):
+        response = authenticated_client.post(
+            "/containers",
+            json={"name": "test-container", "agent_id": "agent-abc123"},
+        )
 
-        with patch("app.services.ecs._update_agent_container"):
-            response = authenticated_client.post(
-                "/containers",
-                json={"name": "test-container", "agent_id": "agent-abc123"},
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "container_id" in data
-        assert data["status"] == "PENDING"
+    assert response.status_code == 200
+    data = response.json()
+    assert "container_id" in data
+    assert data["status"] == "PENDING"
 
 
 @patch("app.middleware.auth.get_auth_client")

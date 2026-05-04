@@ -5,6 +5,11 @@ from mangum import Mangum
 
 from app.main import app
 from app.services.ecs import handle_task_event
+from app.services.kubernetes import (
+    PROVISION_EVENT_SOURCE,
+    PROVISION_EVENT_TYPE,
+    provision_pod,
+)
 
 # Create Mangum handler for API Gateway events
 mangum_handler = Mangum(app, lifespan="auto")
@@ -15,13 +20,21 @@ def handler(event, context):
     Lambda handler supporting multiple event sources.
 
     Routes EventBridge ECS task state changes to handle_task_event,
-    and API Gateway HTTP requests to the FastAPI app via Mangum.
+    routes async k8s pod-provision requests to provision_pod,
+    and forwards API Gateway HTTP requests to the FastAPI app via Mangum.
     """
-    # Check if this is an EventBridge event
+    # EventBridge: ECS task state changes
     if event.get("source") == "aws.ecs":
-        # Handle ECS task state change events
         handle_task_event(event)
         return {"statusCode": 200, "body": "Event processed"}
 
-    # Default to API Gateway/HTTP request handling
+    # Async self-invocation: k8s pod provisioning (fired by _dispatch_provision)
+    if (
+        event.get("source") == PROVISION_EVENT_SOURCE
+        and event.get("detail-type") == PROVISION_EVENT_TYPE
+    ):
+        provision_pod(event["detail"])
+        return {"statusCode": 200, "body": "Pod provisioned"}
+
+    # Default: API Gateway / HTTP request
     return mangum_handler(event, context)

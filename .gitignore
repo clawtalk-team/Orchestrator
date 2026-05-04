@@ -40,3 +40,4 @@ env/
 *.log
 coverage.json
 .env
+.claude/scheduled_tasks.lock

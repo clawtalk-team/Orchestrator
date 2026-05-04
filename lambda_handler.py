@@ -5,8 +5,11 @@ from mangum import Mangum
 
 from app.main import app
 from app.services.ecs import handle_task_event
-from app.services.kubernetes import (PROVISION_EVENT_SOURCE,
-                                      PROVISION_EVENT_TYPE, provision_pod)
+from app.services.kubernetes import (
+    PROVISION_EVENT_SOURCE,
+    PROVISION_EVENT_TYPE,
+    provision_pod,
+)
 
 # Create Mangum handler for API Gateway events
 mangum_handler = Mangum(app, lifespan="auto")

@@ -62,11 +62,13 @@ def test_extract_pod_endpoint_no_status():
 # ── Container creation ────────────────────────────────────────────────────────
 
 def test_create_container(aws_mocks):
-    """create_container records PENDING status and stores pod name in task_arn."""
+    """create_container returns PENDING immediately; provision_pod updates DynamoDB."""
     mock_result = MagicMock()
     mock_result.metadata.name = "oc-test1234"
 
-    with patch("app.services.kubernetes._get_k8s_client") as mock_get:
+    with patch("app.services.kubernetes._get_k8s_client") as mock_get, \
+         patch("app.services.kubernetes._dispatch_provision",
+               side_effect=lambda detail: k8s_service.provision_pod(detail)):
         mock_api = MagicMock()
         mock_api.create_namespaced_pod.return_value = mock_result
         mock_get.return_value = mock_api
@@ -78,11 +80,16 @@ def test_create_container(aws_mocks):
             agent_id="agent-abc",
         )
 
+    # create_container returns the PENDING record before provisioning completes
     assert container.status == "PENDING"
     assert container.backend == "k8s"
-    assert container.task_arn == "oc-test1234"
     assert container.container_id.startswith("oc-")
     mock_api.create_namespaced_pod.assert_called_once()
+
+    # provision_pod ran synchronously via patched dispatch — check DynamoDB for pod name
+    from app.services.dynamodb import get_container
+    updated = get_container("user-123", container.container_id)
+    assert updated.task_arn == "oc-test1234"
 
     # Verify env vars were set correctly
     call_kwargs = mock_api.create_namespaced_pod.call_args
@@ -99,7 +106,9 @@ def test_create_container_protected_env_vars(aws_mocks):
     mock_result = MagicMock()
     mock_result.metadata.name = "oc-test9999"
 
-    with patch("app.services.kubernetes._get_k8s_client") as mock_get:
+    with patch("app.services.kubernetes._get_k8s_client") as mock_get, \
+         patch("app.services.kubernetes._dispatch_provision",
+               side_effect=lambda detail: k8s_service.provision_pod(detail)):
         mock_api = MagicMock()
         mock_api.create_namespaced_pod.return_value = mock_result
         mock_get.return_value = mock_api
@@ -122,25 +131,45 @@ def test_create_container_protected_env_vars(aws_mocks):
 
 def test_create_container_api_failure(aws_mocks):
     """If the k8s API call fails with ApiException the container record is marked FAILED."""
+    from datetime import timezone
+
     from kubernetes.client.exceptions import ApiException
 
+    from app.models.container import Container
     from app.services import dynamodb
+
+    # Pre-create the PENDING record as create_container would
+    now = datetime.now(timezone.utc)
+    container = Container(
+        container_id="oc-apifail1",
+        user_id="user-fail",
+        task_arn="",
+        status="PENDING",
+        health_status="UNKNOWN",
+        backend="k8s",
+        created_at=now,
+        updated_at=now,
+    )
+    dynamodb.create_container(container)
 
     with patch("app.services.kubernetes._get_k8s_client") as mock_get:
         mock_api = MagicMock()
         mock_api.create_namespaced_pod.side_effect = ApiException(status=500, reason="Internal Server Error")
         mock_get.return_value = mock_api
 
-        with pytest.raises(ApiException):
-            k8s_service.create_container(
-                user_id="user-fail",
-                api_key="tok",
-                agent_id="agent-abc",
-            )
+        k8s_service.provision_pod({
+            "container_id": "oc-apifail1",
+            "user_id": "user-fail",
+            "agent_id": "agent-abc",
+            "api_key": "tok",
+            "namespace": "openclaw",
+            "pod_image": "test-image",
+            "image_pull_policy": "IfNotPresent",
+            "image_pull_secret": None,
+            "env_vars": [],
+        })
 
-    # The record written before the API call should be marked FAILED
-    from app.services.dynamodb import get_user_containers
-    containers = get_user_containers("user-fail")
+    containers = dynamodb.get_user_containers("user-fail")
     assert len(containers) == 1
     assert containers[0].status == "FAILED"
 
@@ -148,10 +177,28 @@ def test_create_container_api_failure(aws_mocks):
 def test_create_container_connection_error_marks_failed(aws_mocks):
     """If the k8s API call fails with a connection error the container is marked FAILED.
 
-    urllib3.MaxRetryError is not an ApiException; the old code let it escape
-    without updating DynamoDB.  The fix broadens the except to Exception.
+    urllib3.MaxRetryError is not an ApiException; the broad except in
+    provision_pod ensures DynamoDB is updated even for non-ApiException errors.
     """
+    from datetime import timezone
+
     import urllib3.exceptions
+
+    from app.models.container import Container
+    from app.services import dynamodb
+
+    now = datetime.now(timezone.utc)
+    container = Container(
+        container_id="oc-connfail1",
+        user_id="user-connfail",
+        task_arn="",
+        status="PENDING",
+        health_status="UNKNOWN",
+        backend="k8s",
+        created_at=now,
+        updated_at=now,
+    )
+    dynamodb.create_container(container)
 
     with patch("app.services.kubernetes._get_k8s_client") as mock_get:
         mock_api = MagicMock()
@@ -160,15 +207,19 @@ def test_create_container_connection_error_marks_failed(aws_mocks):
         )
         mock_get.return_value = mock_api
 
-        with pytest.raises(urllib3.exceptions.MaxRetryError):
-            k8s_service.create_container(
-                user_id="user-connfail",
-                api_key="tok",
-                agent_id="agent-abc",
-            )
+        k8s_service.provision_pod({
+            "container_id": "oc-connfail1",
+            "user_id": "user-connfail",
+            "agent_id": "agent-abc",
+            "api_key": "tok",
+            "namespace": "openclaw",
+            "pod_image": "test-image",
+            "image_pull_policy": "IfNotPresent",
+            "image_pull_secret": None,
+            "env_vars": [],
+        })
 
-    from app.services.dynamodb import get_user_containers
-    containers = get_user_containers("user-connfail")
+    containers = dynamodb.get_user_containers("user-connfail")
     assert len(containers) == 1
     assert containers[0].status == "FAILED"
 
@@ -402,14 +453,7 @@ def test_post_containers_k8s_backend(aws_mocks):
     from app.main import app
     from fastapi.testclient import TestClient
 
-    mock_result = MagicMock()
-    mock_result.metadata.name = "oc-routek8s"
-
-    with patch("app.services.kubernetes._get_k8s_client") as mock_get:
-        mock_api = MagicMock()
-        mock_api.create_namespaced_pod.return_value = mock_result
-        mock_get.return_value = mock_api
-
+    with patch("app.services.kubernetes._dispatch_provision"):
         client = TestClient(app)
         client.headers.update({"Authorization": "Bearer test-user:test-token-value"})
 
@@ -423,7 +467,6 @@ def test_post_containers_k8s_backend(aws_mocks):
     assert data["status"] == "PENDING"
     assert data["backend"] == "k8s"
     assert data["container_id"].startswith("oc-")
-    mock_api.create_namespaced_pod.assert_called_once()
 
 
 @_mock_auth()
@@ -432,15 +475,7 @@ def test_post_containers_k8s_backend_default(aws_mocks):
     from app.main import app
     from fastapi.testclient import TestClient
 
-    mock_result = MagicMock()
-    mock_result.metadata.name = "oc-default-k8s"
-
-    with patch("app.services.kubernetes._get_k8s_client") as mock_get, \
-         patch("app.services.kubernetes._update_agent_container"):
-        mock_api = MagicMock()
-        mock_api.create_namespaced_pod.return_value = mock_result
-        mock_get.return_value = mock_api
-
+    with patch("app.services.kubernetes._dispatch_provision"):
         client = TestClient(app)
         client.headers.update({"Authorization": "Bearer test-user:test-token-value"})
 
@@ -451,8 +486,8 @@ def test_post_containers_k8s_backend_default(aws_mocks):
 
     assert response.status_code == 200
     data = response.json()
+    assert data["status"] == "PENDING"
     assert data["backend"] == "k8s"
-    mock_api.create_namespaced_pod.assert_called_once()
 
 
 @_mock_auth()

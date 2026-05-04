@@ -57,8 +57,9 @@ def _load_kubeconfig_from_ssm(ssm_path: str, context: Optional[str]) -> bool:
 def _get_k8s_client() -> k8s_client.CoreV1Api:
     """Return a cached CoreV1Api client, loading kubeconfig on first call.
 
-    urllib3 retries are disabled so a single connection failure respects
-    k8s_api_timeout rather than multiplying it by the retry count.
+    One urllib3 retry is configured to handle transient WireGuard path setup
+    on Lambda cold starts; _wait_for_k8s_api() in provision_pod acts as the
+    readiness gate so the retry count stays bounded.
     """
     global _k8s_core_v1
     if _k8s_core_v1 is not None:
@@ -83,8 +84,8 @@ def _get_k8s_client() -> k8s_client.CoreV1Api:
 
     # Allow one urllib3 retry after the initial attempt — covers a transient
     # hiccup on the first connection once Tailscale's WireGuard path is fresh.
-    # _wait_for_tailscale() must be called before this to ensure Tailscale is
-    # up; without that guard unlimited retries would burn the Lambda timeout.
+    # _wait_for_k8s_api() in provision_pod acts as the readiness gate; with
+    # that guard in place, one retry is safe and covers transient path setup.
     configuration = k8s_client.Configuration.get_default_copy()
     configuration.retries = 1
 
@@ -341,7 +342,7 @@ def _dispatch_provision(detail: Dict[str, Any]) -> None:
             provision_pod(detail)
     else:
         # Local dev: run in a daemon thread so the HTTP response returns immediately.
-        t = threading.Thread(target=provision_pod, args=(detail,), daemon=False)
+        t = threading.Thread(target=provision_pod, args=(detail,), daemon=True)
         t.start()
         logger.info("k8s provision dispatched in thread: container=%s", detail["container_id"])
 

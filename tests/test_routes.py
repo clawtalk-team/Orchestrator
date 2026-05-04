@@ -66,22 +66,16 @@ def test_create_container_authorized(mock_get_auth_client, authenticated_client)
     mock_client.get = AsyncMock(return_value=mock_response)
     mock_get_auth_client.return_value = mock_client
 
-    # Mock the k8s client (default backend is k8s)
-    with patch("app.services.kubernetes._get_k8s_client") as mock_k8s:
-        mock_pod = MagicMock()
-        mock_pod.metadata.name = "oc-test1234"
-        mock_k8s.return_value.create_namespaced_pod.return_value = mock_pod
+    with patch("app.services.kubernetes._dispatch_provision"):
+        response = authenticated_client.post(
+            "/containers",
+            json={"name": "test-container", "agent_id": "agent-abc123"},
+        )
 
-        with patch("app.services.kubernetes._update_agent_container"):
-            response = authenticated_client.post(
-                "/containers",
-                json={"name": "test-container", "agent_id": "agent-abc123"},
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "container_id" in data
-        assert data["status"] == "PENDING"
+    assert response.status_code == 200
+    data = response.json()
+    assert "container_id" in data
+    assert data["status"] == "PENDING"
 
 
 @patch("app.middleware.auth.get_auth_client")

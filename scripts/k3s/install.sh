@@ -61,6 +61,12 @@ kubectl --kubeconfig "${KUBECONFIG_PATH}" --context "${CONTEXT}" \
     create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml \
     | kubectl --kubeconfig "${KUBECONFIG_PATH}" --context "${CONTEXT}" apply -f -
 
+# ── ECR secret refresher ─────────────────────────────────────────────────────
+
+echo "Deploying ECR secret auto-refresher..."
+KUBECONFIG="${KUBECONFIG_PATH}" KUBE_CONTEXT="${CONTEXT}" \
+    bash "$(dirname "${BASH_SOURCE[0]}")/deploy-ecr-refresher.sh"
+
 # ── Smoke test ───────────────────────────────────────────────────────────────
 
 echo ""

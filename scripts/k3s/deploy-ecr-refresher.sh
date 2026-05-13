@@ -48,6 +48,13 @@ kubectl create secret generic "$SECRET_NAME" \
   -n "$NAMESPACE" \
   --dry-run=client -o yaml | kubectl apply -f -
 
+# Ensure ecr-secret exists so the CronJob can patch it on first run
+echo "Ensuring ecr-secret exists in namespace '$NAMESPACE'..."
+kubectl create secret docker-registry ecr-secret \
+  --docker-server=unused --docker-username=unused --docker-password=unused \
+  -n "$NAMESPACE" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 # --------------------------------------------------------------------------
 # 3. Apply RBAC + CronJob manifest
 # --------------------------------------------------------------------------

@@ -17,10 +17,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["ecr-secret"]
-    verbs: ["get", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create"]
+    verbs: ["get", "patch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -59,7 +56,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: ecr-refresher
-              image: amazon/aws-cli:latest
+              image: amazon/aws-cli:2.22.0
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash
@@ -68,14 +65,13 @@ spec:
                 - -c
                 - |
                   echo "Assuming ECR role..."
-                  CREDS=$(aws sts assume-role \
-                    --role-arn "$ROLE_ARN" \
-                    --role-session-name ecr-refresh-$(date +%s) \
-                    --output json)
-
-                  export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | grep -o '"AccessKeyId": "[^"]*' | cut -d'"' -f4)
-                  export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | grep -o '"SecretAccessKey": "[^"]*' | cut -d'"' -f4)
-                  export AWS_SESSION_TOKEN=$(echo "$CREDS" | grep -o '"SessionToken": "[^"]*' | cut -d'"' -f4)
+                  read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< \
+                    $(aws sts assume-role \
+                      --role-arn "$ROLE_ARN" \
+                      --role-session-name ecr-refresh-$(date +%s) \
+                      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+                      --output text)
+                  export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
                   echo "Getting ECR login password..."
                   ECR_PASSWORD=$(aws ecr get-login-password --region "$AWS_REGION")
@@ -90,8 +86,10 @@ spec:
                   DOCKER_CONFIG_B64=$(echo -n "$DOCKER_CONFIG" | tr -d '[:space:]' | base64 -w 0)
 
                   K8S_API="https://kubernetes.default.svc"
-                  SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-                  CA_CERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                  SA_PATH="/var/run/secrets/kubernetes.io/serviceaccount"
+                  SA_TOKEN=$(cat "${SA_PATH}/token")
+                  CA_CERT="${SA_PATH}/ca.crt"
+                  NAMESPACE=$(cat "${SA_PATH}/namespace")
 
                   # Patch the existing secret (replace .dockerconfigjson)
                   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -99,7 +97,7 @@ spec:
                     -H "Authorization: Bearer ${SA_TOKEN}" \
                     -H "Content-Type: application/strategic-merge-patch+json" \
                     --cacert "$CA_CERT" \
-                    "${K8S_API}/api/v1/namespaces/openclaw/secrets/ecr-secret" \
+                    "${K8S_API}/api/v1/namespaces/${NAMESPACE}/secrets/ecr-secret" \
                     -d "{\"data\":{\".dockerconfigjson\":\"${DOCKER_CONFIG_B64}\"}}")
 
                   if [[ "$HTTP_STATUS" == "200" ]]; then

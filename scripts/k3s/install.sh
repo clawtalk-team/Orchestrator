@@ -65,7 +65,7 @@ kubectl --kubeconfig "${KUBECONFIG_PATH}" --context "${CONTEXT}" \
 
 echo "Deploying ECR secret auto-refresher..."
 KUBECONFIG="${KUBECONFIG_PATH}" KUBE_CONTEXT="${CONTEXT}" \
-    bash "$(dirname "${BASH_SOURCE[0]}")/deploy-ecr-refresher.sh"
+    bash "$(dirname "${BASH_SOURCE[0]}")/../../../infrastructure/scripts/k3s/deploy-ecr-refresher.sh"
 
 # ── Smoke test ───────────────────────────────────────────────────────────────
 

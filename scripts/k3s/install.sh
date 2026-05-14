@@ -64,8 +64,16 @@ kubectl --kubeconfig "${KUBECONFIG_PATH}" --context "${CONTEXT}" \
 # ── ECR secret refresher ─────────────────────────────────────────────────────
 
 echo "Deploying ECR secret auto-refresher..."
-KUBECONFIG="${KUBECONFIG_PATH}" KUBE_CONTEXT="${CONTEXT}" \
-    bash "$(dirname "${BASH_SOURCE[0]}")/deploy-ecr-refresher.sh"
+INFRA_DIR="${INFRA_DIR:-$(dirname "${BASH_SOURCE[0]}")/../../../infrastructure}"
+REFRESHER_SCRIPT="${INFRA_DIR}/scripts/k3s/deploy-ecr-refresher.sh"
+
+if [[ ! -f "${REFRESHER_SCRIPT}" ]]; then
+    echo "ERROR: ECR refresher script not found at ${REFRESHER_SCRIPT}" >&2
+    echo "Ensure the 'infrastructure' repository is cloned as a sibling or set INFRA_DIR." >&2
+    exit 1
+fi
+
+KUBECONFIG="${KUBECONFIG_PATH}" KUBE_CONTEXT="${CONTEXT}" bash "${REFRESHER_SCRIPT}"
 
 # ── Smoke test ───────────────────────────────────────────────────────────────
 

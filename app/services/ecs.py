@@ -121,6 +121,7 @@ def create_container(
             {"name": "CONFIG_NAME", "value": config_name},
             {"name": "ORCHESTRATOR_URL", "value": settings.orchestrator_url},
             {"name": "OPENCLAW_DISABLE_BONJOUR", "value": "1"},
+            {"name": "LLM_STREAMING", "value": "true"},
         ]
 
         if agent_id:

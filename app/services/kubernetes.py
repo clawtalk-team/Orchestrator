@@ -182,6 +182,7 @@ def _build_plain_env(
         "CONFIG_NAME": config_name,
         "ORCHESTRATOR_URL": settings.orchestrator_url,
         "OPENCLAW_DISABLE_BONJOUR": "1",
+        "LLM_STREAMING": "true",
     }
     if agent_id:
         plain_env["AGENT_ID"] = agent_id
